@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  quizagent:
+    build: .
+    container_name: quizagent_ci
+    ports:
+      - "8501:8501"          # accessible sur http://localhost:8501
+    volumes:
+      - quiz_data:/app/data  # base SQLite persistante
+    environment:
+      - ADMIN_PASSWORD=admin2026   # ← changez ici
+      - APP_TITLE=QuizAgent CI
+      - APP_SUBTITLE=Évaluations des agents de terrain
+      # - ORG_NAME=ANStat / INS-CI
+      # - DB_PATH=data/quiz_app.db  # chemin par défaut, modifiable
+    restart: unless-stopped
+
+volumes:
+  quiz_data:                 # volume Docker nommé — survit aux redémarrages
