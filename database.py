@@ -5,6 +5,7 @@ database.py — Couche de données SQLite pour QuizAgent CI
 import sqlite3
 import json
 import os
+import random
 from datetime import datetime
 
 import config
@@ -17,10 +18,11 @@ def _db_path() -> str:
 
 
 def get_conn():
-    conn = sqlite3.connect(_db_path(), check_same_thread=False)
+    conn = sqlite3.connect(_db_path(), check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
@@ -31,20 +33,22 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS agents (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         nom         TEXT    NOT NULL,
-        prenom      TEXT    DEFAULT '',
-        matricule   TEXT    DEFAULT '',
+        prenom      TEXT    DEFAULT \'\',
+        matricule   TEXT    DEFAULT \'\',
         published   INTEGER DEFAULT 0,
         created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS quizzes (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        titre          TEXT    NOT NULL,
-        code           TEXT    UNIQUE NOT NULL,
-        duree_minutes  INTEGER DEFAULT 30,
-        description    TEXT    DEFAULT '',
-        actif          INTEGER DEFAULT 1,
-        created_at     TEXT    DEFAULT CURRENT_TIMESTAMP
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        titre                TEXT    NOT NULL,
+        code                 TEXT    UNIQUE NOT NULL,
+        duree_minutes        INTEGER DEFAULT 30,
+        description          TEXT    DEFAULT \'\',
+        actif                INTEGER DEFAULT 1,
+        show_score           INTEGER DEFAULT 1,
+        randomize_questions  INTEGER DEFAULT 0,
+        created_at           TEXT    DEFAULT CURRENT_TIMESTAMP
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS questions (
@@ -84,11 +88,18 @@ def init_db():
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id  INTEGER NOT NULL,
         question_id INTEGER NOT NULL,
-        reponse     TEXT    DEFAULT '',
+        reponse     TEXT    DEFAULT \'\',
         is_correct  INTEGER DEFAULT 0,
-        FOREIGN KEY (session_id)  REFERENCES sessions(id)  ON DELETE CASCADE,
+        FOREIGN KEY (session_id)  REFERENCES sessions(id) ON DELETE CASCADE,
         FOREIGN KEY (question_id) REFERENCES questions(id)
     )""")
+
+    # Migrations : ajout de colonnes si elles n\'existent pas encore
+    for col, default in [("show_score", 1), ("randomize_questions", 0)]:
+        try:
+            c.execute(f"ALTER TABLE quizzes ADD COLUMN {col} INTEGER DEFAULT {default}")
+        except Exception:
+            pass
 
     conn.commit()
     conn.close()
@@ -130,16 +141,12 @@ def upsert_agents(df):
         matricule = str(row.get("matricule", "")).strip()
         if not nom or nom.lower() == "nan":
             continue
-        if prenom.lower() == "nan":
-            prenom = ""
-        if matricule.lower() == "nan":
-            matricule = ""
+        if prenom.lower() == "nan": prenom = ""
+        if matricule.lower() == "nan": matricule = ""
         c.execute("SELECT id FROM agents WHERE nom=? AND prenom=?", (nom, prenom))
         if not c.fetchone():
-            c.execute(
-                "INSERT INTO agents (nom, prenom, matricule) VALUES (?,?,?)",
-                (nom, prenom, matricule),
-            )
+            c.execute("INSERT INTO agents (nom, prenom, matricule) VALUES (?,?,?)",
+                      (nom, prenom, matricule))
             inserted += 1
     conn.commit()
     conn.close()
@@ -168,8 +175,15 @@ def unpublish_all_agents():
 
 
 def delete_agent(agent_id: int):
+    """Supprime un agent et toutes ses sessions/réponses associées."""
     conn = get_conn()
-    conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+    c = conn.cursor()
+    c.execute("SELECT id FROM sessions WHERE agent_id=?", (agent_id,))
+    session_ids = [r[0] for r in c.fetchall()]
+    for sid in session_ids:
+        c.execute("DELETE FROM answers WHERE session_id=?", (sid,))
+    c.execute("DELETE FROM sessions WHERE agent_id=?", (agent_id,))
+    c.execute("DELETE FROM agents WHERE id=?", (agent_id,))
     conn.commit()
     conn.close()
 
@@ -181,10 +195,8 @@ def add_agent_manual(nom: str, prenom: str, matricule: str):
     if c.fetchone():
         conn.close()
         return False
-    c.execute(
-        "INSERT INTO agents (nom, prenom, matricule) VALUES (?,?,?)",
-        (nom, prenom, matricule),
-    )
+    c.execute("INSERT INTO agents (nom, prenom, matricule) VALUES (?,?,?)",
+              (nom, prenom, matricule))
     conn.commit()
     conn.close()
     return True
@@ -219,12 +231,14 @@ def get_quiz(quiz_id: int):
     return dict(row) if row else None
 
 
-def create_quiz(titre, code, duree_minutes, description) -> int:
+def create_quiz(titre, code, duree_minutes, description, show_score=1, randomize=0) -> int:
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO quizzes (titre, code, duree_minutes, description) VALUES (?,?,?,?)",
-        (titre, code.upper(), duree_minutes, description),
+        """INSERT INTO quizzes
+           (titre, code, duree_minutes, description, show_score, randomize_questions)
+           VALUES (?,?,?,?,?,?)""",
+        (titre, code.upper(), duree_minutes, description, show_score, randomize),
     )
     qid = c.lastrowid
     conn.commit()
@@ -232,11 +246,16 @@ def create_quiz(titre, code, duree_minutes, description) -> int:
     return qid
 
 
-def update_quiz(quiz_id, titre, code, duree_minutes, description, actif):
+def update_quiz(quiz_id, titre, code, duree_minutes, description, actif,
+                show_score=1, randomize=0):
     conn = get_conn()
     conn.execute(
-        "UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=? WHERE id=?",
-        (titre, code.upper(), duree_minutes, description, actif, quiz_id),
+        """UPDATE quizzes
+           SET titre=?,code=?,duree_minutes=?,description=?,actif=?,
+               show_score=?,randomize_questions=?
+           WHERE id=?""",
+        (titre, code.upper(), duree_minutes, description, actif,
+         show_score, randomize, quiz_id),
     )
     conn.commit()
     conn.close()
@@ -251,7 +270,7 @@ def delete_quiz(quiz_id: int):
 
 # ── QUESTIONS ─────────────────────────────────────────────────────────────────
 
-def get_questions(quiz_id: int):
+def get_questions(quiz_id: int, shuffled: bool = False):
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT * FROM questions WHERE quiz_id=? ORDER BY ordre", (quiz_id,))
@@ -260,6 +279,8 @@ def get_questions(quiz_id: int):
         c.execute("SELECT * FROM options WHERE question_id=?", (q["id"],))
         q["options"] = [dict(o) for o in c.fetchall()]
     conn.close()
+    if shuffled:
+        random.shuffle(questions)
     return questions
 
 
@@ -276,10 +297,8 @@ def add_question(quiz_id, texte, qtype, ordre, points,
     qid = c.lastrowid
     if options and qtype in ("single", "multiple"):
         for opt in options:
-            c.execute(
-                "INSERT INTO options (question_id,texte,is_correct) VALUES (?,?,?)",
-                (qid, opt["texte"], int(opt["is_correct"])),
-            )
+            c.execute("INSERT INTO options (question_id,texte,is_correct) VALUES (?,?,?)",
+                      (qid, opt["texte"], int(opt["is_correct"])))
     conn.commit()
     conn.close()
     return qid
@@ -308,10 +327,8 @@ def reorder_questions(quiz_id: int):
 def create_session(agent_id: int, quiz_id: int, max_score: float) -> int:
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "INSERT INTO sessions (agent_id,quiz_id,max_score) VALUES (?,?,?)",
-        (agent_id, quiz_id, max_score),
-    )
+    c.execute("INSERT INTO sessions (agent_id,quiz_id,max_score) VALUES (?,?,?)",
+              (agent_id, quiz_id, max_score))
     sid = c.lastrowid
     conn.commit()
     conn.close()
@@ -321,10 +338,8 @@ def create_session(agent_id: int, quiz_id: int, max_score: float) -> int:
 def submit_session(session_id: int, score: float, answer_records: list):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "UPDATE sessions SET score=?,completed=1,completed_at=? WHERE id=?",
-        (score, datetime.now().isoformat(), session_id),
-    )
+    c.execute("UPDATE sessions SET score=?,completed=1,completed_at=? WHERE id=?",
+              (score, datetime.now().isoformat(), session_id))
     for ans in answer_records:
         c.execute(
             "INSERT INTO answers (session_id,question_id,reponse,is_correct) VALUES (?,?,?,?)",
@@ -358,10 +373,8 @@ def get_results(quiz_id=None):
 def session_already_completed(agent_id: int, quiz_id: int) -> bool:
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "SELECT id FROM sessions WHERE agent_id=? AND quiz_id=? AND completed=1",
-        (agent_id, quiz_id),
-    )
+    c.execute("SELECT id FROM sessions WHERE agent_id=? AND quiz_id=? AND completed=1",
+              (agent_id, quiz_id))
     exists = c.fetchone() is not None
     conn.close()
     return exists
