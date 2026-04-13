@@ -184,9 +184,9 @@ def render_home():
         unsafe_allow_html=True)
     c1,c2=st.columns(2)
     with c1:
-        if st.button("👤  Je suis Agent",use_container_width=True,type="primary"): go("agent_search")
+        if st.button("👤  Je suis Agent",key="home_agent",use_container_width=True,type="primary"): go("agent_search")
     with c2:
-        if st.button("⚙️  Administration",use_container_width=True): go("admin_login")
+        if st.button("⚙️  Administration",key="home_admin",use_container_width=True): go("admin_login")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -236,7 +236,7 @@ def render_agent_quiz_code():
     with c1:
         if st.button("← Retour",key="aqc_back",use_container_width=True): go("agent_search")
     with c2:
-        if st.button("▶  Commencer",type="primary",use_container_width=True):
+        if st.button("▶  Commencer",key="aqc_start",type="primary",use_container_width=True):
             _start_quiz(agent,code)
 
 
@@ -438,7 +438,7 @@ def render_agent_quiz():
         except Exception: pass
 
     st.markdown("---")
-    if st.button("✅  Soumettre mes réponses",type="primary",use_container_width=True):
+    if st.button("✅  Soumettre mes réponses",key="quiz_submit",type="primary",use_container_width=True):
         _submit(); go("agent_result")
 
 
@@ -470,7 +470,7 @@ def render_agent_result():
             f'<div style="color:var(--mu);font-size:.9rem;margin-top:6px">{agent["nom"]} {agent["prenom"]} · {quiz["titre"]}</div></div>',
             unsafe_allow_html=True)
     st.markdown(f'<p style="text-align:center;color:var(--mu);font-size:.82rem;margin:6px 0 14px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>',unsafe_allow_html=True)
-    if st.button("🏠  Retour à l'accueil",use_container_width=True):
+    if st.button("🏠  Retour à l'accueil",key="result_home",use_container_width=True):
         for k in("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score"): st.session_state[k]=_D[k]
         go("home")
 
@@ -487,9 +487,9 @@ def render_admin_login():
     pwd=st.text_input(" ",type="password",placeholder="Mot de passe…",label_visibility="collapsed")
     c1,c2=st.columns([1,2])
     with c1:
-        if st.button("← Retour",key="as_back",use_container_width=True): go("home")
+        if st.button("← Retour",key="al_back",use_container_width=True): go("home")
     with c2:
-        if st.button("Se connecter",type="primary",use_container_width=True):
+        if st.button("Se connecter",key="al_login",type="primary",use_container_width=True):
             if pwd==config.ADMIN_PASSWORD: st.session_state.admin_logged=True; go("admin_dashboard")
             else: st.error("Mot de passe incorrect.")
     st.markdown('</div>',unsafe_allow_html=True)
@@ -510,7 +510,7 @@ def render_admin_dashboard():
     with t3: _tab_results()
 
     st.markdown("---")
-    if st.button("🚪  Déconnexion",use_container_width=True): st.session_state.admin_logged=False; go("home")
+    if st.button("🚪  Déconnexion",key="admin_logout",use_container_width=True): st.session_state.admin_logged=False; go("home")
 
 
 # ── Vue d'ensemble ────────────────────────────────────────────
@@ -627,12 +627,12 @@ def _tab_agents():
                 else:
                     st.dataframe(df.head(5),use_container_width=True)
                     st.caption(f"{len(df)} agent(s)")
-                    if st.button("✅  Importer",type="primary",use_container_width=True):
+                    if st.button("✅  Importer",key="ag_import_file",type="primary",use_container_width=True):
                         n=upsert_agents(df); st.success(f"{n} importé(s)."); st.rerun()
             except Exception as e: st.error(f"Erreur : {e}")
         st.markdown("---"); st.markdown("**Google Sheets (lien public)**")
         gs=st.text_input("URL",placeholder="https://docs.google.com/spreadsheets/d/…",label_visibility="collapsed")
-        if st.button("Importer depuis Google Sheets",use_container_width=True): _gs(gs)
+        if st.button("Importer depuis Google Sheets",key="ag_import_gs",use_container_width=True): _gs(gs)
     with s3:
         ags=get_all_agents()
         if not ags: st.info("Aucun agent."); return
