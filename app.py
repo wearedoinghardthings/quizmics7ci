@@ -198,7 +198,7 @@ def render_agent_search():
     slbl("Tapez votre nom ou matricule")
     q = st.text_input(" ", placeholder="Ex : Konan, Diallo, AGT001…",
                        label_visibility="collapsed", key="sq")
-    if st.button("← Retour",use_container_width=True): go("home")
+    if st.button("← Retour",key="as_back",use_container_width=True): go("home")
     q = (q or "").strip()
     if len(q)<2:
         if len(q)==1: st.caption("Continuez à taper…")
@@ -234,7 +234,7 @@ def render_agent_quiz_code():
     code=st.text_input(" ",placeholder="Ex : QZ001",max_chars=20,label_visibility="collapsed")
     c1,c2=st.columns([1,2])
     with c1:
-        if st.button("← Retour",use_container_width=True): go("agent_search")
+        if st.button("← Retour",key="aqc_back",use_container_width=True): go("agent_search")
     with c2:
         if st.button("▶  Commencer",type="primary",use_container_width=True):
             _start_quiz(agent,code)
@@ -487,7 +487,7 @@ def render_admin_login():
     pwd=st.text_input(" ",type="password",placeholder="Mot de passe…",label_visibility="collapsed")
     c1,c2=st.columns([1,2])
     with c1:
-        if st.button("← Retour",use_container_width=True): go("home")
+        if st.button("← Retour",key="as_back",use_container_width=True): go("home")
     with c2:
         if st.button("Se connecter",type="primary",use_container_width=True):
             if pwd==config.ADMIN_PASSWORD: st.session_state.admin_logged=True; go("admin_dashboard")
@@ -584,10 +584,10 @@ def _tab_overview():
     st.markdown('<p class="slbl">Actions rapides</p>',unsafe_allow_html=True)
     c1,c2=st.columns(2)
     with c1:
-        if st.button("➕  Créer un quiz",use_container_width=True,type="primary"):
+        if st.button("➕  Créer un quiz",key="ovw_create_quiz",use_container_width=True,type="primary"):
             st.session_state.edit_quiz_id=None; go("admin_quiz_edit")
     with c2:
-        if st.button("✅  Publier tous les agents",use_container_width=True):
+        if st.button("✅  Publier tous les agents",key="ovw_pub_all",use_container_width=True):
             publish_all_agents(); st.rerun()
 
 
@@ -640,9 +640,9 @@ def _tab_agents():
         st.markdown(f'<p style="color:var(--mu);font-size:.85rem;margin-bottom:10px"><b>{len(ags)}</b> agent(s) &nbsp;·&nbsp;{badge(f"{nb} publié(s)","g")} &nbsp;{badge(f"{len(ags)-nb} brouillon(s)","o")}</p>',unsafe_allow_html=True)
         c1,c2=st.columns(2)
         with c1:
-            if st.button("✅ Publier tous",use_container_width=True,type="primary"): publish_all_agents(); st.rerun()
+            if st.button("✅ Publier tous",key="ag_pub_all",use_container_width=True,type="primary"): publish_all_agents(); st.rerun()
         with c2:
-            if st.button("⛔ Dépublier tous",use_container_width=True): unpublish_all_agents(); st.rerun()
+            if st.button("⛔ Dépublier tous",key="ag_unpub_all",use_container_width=True): unpublish_all_agents(); st.rerun()
         st.markdown("---")
         filtre=st.text_input("🔍 Filtrer",placeholder="Nom, matricule…",key="af",label_visibility="collapsed")
         shown=[a for a in ags if not filtre or filtre.lower() in f"{a['nom']} {a['prenom']} {a['matricule']}".lower()]
@@ -676,7 +676,7 @@ def _gs(url):
 # ── Quiz ──────────────────────────────────────────────────────
 
 def _tab_quizzes():
-    if st.button("➕  Créer un quiz",type="primary",use_container_width=True):
+    if st.button("➕  Créer un quiz",key="qz_create_quiz",type="primary",use_container_width=True):
         st.session_state.edit_quiz_id=None; go("admin_quiz_edit")
     st.markdown("---")
     quizzes=get_all_quizzes()
@@ -761,7 +761,7 @@ def render_admin_quiz_edit():
 
     cur_id=st.session_state.edit_quiz_id
     if not cur_id:
-        if st.button("← Retour",use_container_width=True): go("admin_dashboard")
+        if st.button("← Retour",key="qe_back_top",use_container_width=True): go("admin_dashboard")
         return
 
     questions=get_questions(cur_id)
@@ -808,7 +808,7 @@ def render_admin_quiz_edit():
                 st.success("Question ajoutée ✓"); st.rerun()
 
     st.markdown("---")
-    if st.button("← Retour au dashboard",use_container_width=True): go("admin_dashboard")
+    if st.button("← Retour au dashboard",key="qe_back_bot",use_container_width=True): go("admin_dashboard")
 
 
 # ══════════════════════════════════════════════════════════════
