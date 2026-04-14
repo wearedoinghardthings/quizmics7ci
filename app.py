@@ -11,7 +11,7 @@ from functools import lru_cache
 from database import (
     init_db, search_agents, get_all_agents, upsert_agents,
     set_agent_published, publish_all_agents, unpublish_all_agents,
-    get_agent_by_id, delete_agent, add_agent_manual,
+    get_agent_by_id, get_session_by_id, delete_agent, add_agent_manual,
     get_quiz_by_code, get_all_quizzes, get_quiz, create_quiz, update_quiz, delete_quiz,
     get_questions, add_question, delete_question, reorder_questions,
     create_session, save_quiz_progress, get_incomplete_session,
@@ -27,116 +27,318 @@ st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box}
-html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-family:'Outfit',sans-serif!important}
+html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label,p,span,div{font-family:'Plus Jakarta Sans',sans-serif!important}
 #MainMenu,footer,header,.stDeployButton{display:none!important}
 .main,.main>div,section.main,.appview-container,.block-container{overflow:visible!important}
-.block-container{padding:0 1rem 5rem!important;max-width:640px!important;margin:0 auto!important}
+.block-container{padding:0 0 5rem!important;max-width:640px!important;margin:0 auto!important}
 :root{
-  --B:#1D4ED8;--Bd:#1E3A8A;--Bl:#EFF6FF;--Bm:#DBEAFE;
-  --G:#059669;--O:#D97706;--R:#DC2626;--P:#7C3AED;
-  --bg:#F8FAFF;--sur:#FFFFFF;--bor:#E2E8F4;--txt:#0F172A;--mu:#64748B;
-  --r:12px;--sh:0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.05);
-  --shb:0 4px 20px rgba(29,78,216,.18)
+  --B:#2563EB;--Bd:#1E40AF;--Bx:#1E3A8A;--Bl:#EFF6FF;--Bm:#DBEAFE;
+  --G:#10B981;--Gd:#059669;--Gl:#D1FAE5;
+  --O:#F59E0B;--Od:#D97706;--Ol:#FEF3C7;
+  --R:#EF4444;--Rd:#DC2626;--Rl:#FEE2E2;
+  --P:#8B5CF6;--Pl:#EDE9FE;
+  --bg:#F1F5FD;--sur:#FFFFFF;--bor:#E4EAF5;
+  --txt:#0F1729;--mu:#64748B;--mu2:#94A3B8;
+  --r:14px;--r2:10px;
+  --sh:0 1px 3px rgba(15,23,42,.06),0 4px 16px rgba(15,23,42,.04);
+  --shm:0 4px 20px rgba(15,23,42,.1),0 1px 6px rgba(15,23,42,.06);
+  --shb:0 8px 32px rgba(37,99,235,.2),0 2px 8px rgba(37,99,235,.1)
 }
-/* ── Topbar ── */
-.topbar{background:var(--Bd);margin:0 -1rem 1.5rem -1rem;padding:14px 20px;display:flex;align-items:center;gap:10px}
-.tt{color:#fff;font-size:1.05rem;font-weight:700}
-/* ── Hero ── */
-.hero{background:linear-gradient(145deg,var(--Bd),var(--B));border-radius:18px;padding:36px 24px 32px;text-align:center;margin-bottom:20px;box-shadow:var(--shb)}
-.hi{font-size:2.8rem;margin-bottom:6px}.ht{color:#fff;font-size:1.85rem;font-weight:900;margin:0 0 5px;letter-spacing:-.5px}.hs{color:rgba(255,255,255,.72);font-size:.95rem;margin:0}
-/* ── Boutons ── */
-.stButton>button{font-family:'Outfit',sans-serif!important;font-weight:600!important;font-size:15px!important;border-radius:10px!important;padding:13px 20px!important;width:100%!important;transition:all .15s!important;min-height:48px!important}
-.stButton>button[kind="primary"]{background:var(--B)!important;border:none!important;color:#fff!important;box-shadow:0 3px 10px rgba(29,78,216,.3)!important}
-.stButton>button[kind="primary"]:hover{background:var(--Bd)!important;transform:translateY(-1px)!important}
-.stButton>button:not([kind="primary"]){background:var(--sur)!important;border:1.5px solid var(--bor)!important;color:var(--txt)!important}
-/* ── Inputs ── */
-.stTextInput>div>div>input,.stTextArea>div>div>textarea,.stNumberInput>div>div>input{font-family:'Outfit',sans-serif!important;font-size:16px!important;border-radius:10px!important;border:1.5px solid var(--bor)!important;padding:12px 14px!important}
-.stTextInput>div>div>input:focus,.stTextArea>div>div>textarea:focus{border-color:var(--B)!important;box-shadow:0 0 0 3px rgba(29,78,216,.1)!important}
-.stTextInput label,.stTextArea label,.stSelectbox label,.stNumberInput label{font-size:11px!important;font-weight:700!important;color:var(--mu)!important;text-transform:uppercase!important;letter-spacing:.08em!important}
-/* ── Timer fixe ── */
-#quiz-timer-bar{position:fixed!important;top:0!important;left:0!important;right:0!important;z-index:99999!important;background:rgba(248,250,255,.97)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;border-bottom:1px solid var(--bor)!important;box-shadow:0 2px 12px rgba(15,23,42,.08)!important;padding:8px 1rem 6px!important}
-#quiz-timer-bar .inner{max-width:620px;margin:0 auto}
-.tbox{border-radius:12px;padding:12px 20px;text-align:center;display:flex;align-items:center;justify-content:center;gap:14px}
-.tn{background:linear-gradient(135deg,var(--Bd),var(--B));box-shadow:0 3px 12px rgba(29,78,216,.25)}
-.tw{background:linear-gradient(135deg,#92400E,var(--O));box-shadow:0 3px 12px rgba(217,119,6,.25)}
-.td{background:linear-gradient(135deg,#7F1D1D,var(--R));box-shadow:0 3px 12px rgba(220,38,38,.3);animation:pulse .7s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.82}}
-.ttime{color:#fff;font-size:2.2rem;font-weight:900;letter-spacing:4px;margin:0;line-height:1}
-.tlbl{color:rgba(255,255,255,.75);font-size:.75rem;font-weight:600;margin:3px 0 0;text-transform:uppercase;letter-spacing:.08em}
-.ticon{font-size:1.6rem}
-/* ── Progression ── */
-.prog{margin:6px 0 14px}.prog-row{display:flex;justify-content:space-between;font-size:.82rem;color:var(--mu);font-weight:500;margin-bottom:5px}
-.prog-bg{background:var(--Bm);border-radius:99px;height:6px}.prog-fill{background:var(--B);height:6px;border-radius:99px;transition:width .3s}
-/* ── Question ── */
-.qcard{background:var(--sur);border:1.5px solid var(--bor);border-left:4px solid var(--B);border-radius:0 var(--r) var(--r) 0;padding:14px 16px 4px;box-shadow:var(--sh);margin:12px 0 0}
-.qmeta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
-.qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
-.qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
-.qtxt{font-size:15px;font-weight:600;color:var(--txt);margin:0 0 10px;line-height:1.45}
-/* ── Radio/Checkbox ── */
-.stRadio>div{gap:5px!important}
-.stRadio>div>label{background:var(--bg)!important;border:1.5px solid var(--bor)!important;border-radius:10px!important;padding:11px 14px!important;font-size:14.5px!important;font-weight:500!important;min-height:46px!important;cursor:pointer!important;transition:all .12s!important}
-.stRadio>div>label:hover{border-color:var(--B)!important;background:var(--Bl)!important}
-div[data-testid="stCheckbox"] label{background:var(--bg);border:1.5px solid var(--bor);border-radius:10px;padding:11px 14px;font-size:14.5px!important;font-weight:500!important;min-height:46px;margin-bottom:5px;transition:all .12s}
+
+/* ══ TOPBAR ══ */
+.topbar{
+  background:linear-gradient(135deg,var(--Bx) 0%,var(--Bd) 100%);
+  margin:0 -1rem 1.8rem -1rem;
+  padding:16px 22px;
+  display:flex;align-items:center;gap:12px;
+  box-shadow:0 2px 20px rgba(30,58,138,.25);
+}
+.topbar-icon{font-size:1.3rem}
+.topbar-title{color:#fff;font-size:1.05rem;font-weight:700;letter-spacing:-.01em}
+.topbar-sub{color:rgba(255,255,255,.55);font-size:.82rem;margin-left:auto}
+
+/* ══ HERO HOME ══ */
+.hero{
+  background:linear-gradient(145deg,var(--Bx) 0%,#1D4ED8 50%,#3B82F6 100%);
+  border-radius:22px;padding:44px 28px 40px;text-align:center;
+  margin:1rem 1rem 1.5rem;
+  box-shadow:var(--shb);
+  position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;top:-60px;right:-60px;
+  width:240px;height:240px;border-radius:50%;
+  background:rgba(255,255,255,.06);
+}
+.hero::after{
+  content:'';position:absolute;bottom:-80px;left:-40px;
+  width:200px;height:200px;border-radius:50%;
+  background:rgba(255,255,255,.04);
+}
+.hero-icon{font-size:3rem;margin-bottom:10px;position:relative;z-index:1}
+.hero-title{color:#fff;font-size:2rem;font-weight:900;margin:0 0 6px;letter-spacing:-.04em;position:relative;z-index:1}
+.hero-sub{color:rgba(255,255,255,.7);font-size:1rem;margin:0;font-weight:400;position:relative;z-index:1}
+.hero-org{color:rgba(255,255,255,.5);font-size:.85rem;margin-top:4px;position:relative;z-index:1}
+
+/* ══ BOUTONS ══ */
+.stButton>button{
+  font-family:'Plus Jakarta Sans',sans-serif!important;
+  font-weight:700!important;font-size:15px!important;
+  border-radius:var(--r2)!important;
+  padding:13px 22px!important;width:100%!important;
+  transition:all .18s cubic-bezier(.4,0,.2,1)!important;
+  min-height:50px!important;letter-spacing:-.01em!important;
+}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(135deg,var(--B) 0%,var(--Bd) 100%)!important;
+  border:none!important;color:#fff!important;
+  box-shadow:0 4px 14px rgba(37,99,235,.35)!important;
+}
+.stButton>button[kind="primary"]:hover{
+  background:linear-gradient(135deg,#1D4ED8 0%,var(--Bx) 100%)!important;
+  box-shadow:0 6px 20px rgba(37,99,235,.45)!important;
+  transform:translateY(-1px)!important;
+}
+.stButton>button[kind="primary"]:active{transform:translateY(0)!important}
+.stButton>button:not([kind="primary"]){
+  background:var(--sur)!important;
+  border:2px solid var(--bor)!important;
+  color:var(--txt)!important;
+  box-shadow:var(--sh)!important;
+}
+.stButton>button:not([kind="primary"]):hover{
+  border-color:var(--B)!important;color:var(--B)!important;
+  background:var(--Bl)!important;
+}
+
+/* ══ INPUTS ══ */
+.stTextInput>div>div>input,.stTextArea>div>div>textarea,.stNumberInput>div>div>input{
+  font-family:'Plus Jakarta Sans',sans-serif!important;
+  font-size:15px!important;border-radius:var(--r2)!important;
+  border:2px solid var(--bor)!important;padding:12px 15px!important;
+  background:var(--sur)!important;color:var(--txt)!important;
+  transition:border-color .15s,box-shadow .15s!important;
+}
+.stTextInput>div>div>input:focus,.stTextArea>div>div>textarea:focus{
+  border-color:var(--B)!important;
+  box-shadow:0 0 0 4px rgba(37,99,235,.1)!important;outline:none!important;
+}
+.stTextInput label,.stTextArea label,.stSelectbox label,.stNumberInput label{
+  font-size:11.5px!important;font-weight:700!important;color:var(--mu)!important;
+  text-transform:uppercase!important;letter-spacing:.08em!important;margin-bottom:5px!important;
+}
+.stSelectbox>div>div{
+  border-radius:var(--r2)!important;border:2px solid var(--bor)!important;
+  font-size:15px!important;
+}
+
+/* ══ TIMER FIXE ══ */
+#quiz-timer-bar{
+  position:fixed!important;top:0!important;left:0!important;right:0!important;
+  z-index:99999!important;
+  padding:8px 1rem 6px!important;
+  background:rgba(241,245,253,.96)!important;
+  backdrop-filter:blur(16px)!important;
+  -webkit-backdrop-filter:blur(16px)!important;
+  border-bottom:1px solid var(--bor)!important;
+  box-shadow:0 2px 16px rgba(15,23,42,.08)!important;
+}
+#quiz-timer-bar .inner{max-width:640px;margin:0 auto}
+.tbox{border-radius:var(--r2);padding:12px 20px;display:flex;align-items:center;gap:14px}
+.tn{background:linear-gradient(135deg,var(--Bx),var(--B));box-shadow:0 3px 14px rgba(37,99,235,.3)}
+.tw{background:linear-gradient(135deg,#92400E,var(--O));box-shadow:0 3px 14px rgba(245,158,11,.3)}
+.td{background:linear-gradient(135deg,#7F1D1D,var(--R));box-shadow:0 3px 14px rgba(239,68,68,.35);animation:pulse .65s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.85;transform:scale(1.01)}}
+.ttime{color:#fff;font-size:2.1rem;font-weight:900;letter-spacing:4px;margin:0;line-height:1;font-variant-numeric:tabular-nums}
+.tlbl{color:rgba(255,255,255,.75);font-size:.72rem;font-weight:700;margin:4px 0 0;text-transform:uppercase;letter-spacing:.1em}
+.ticon{font-size:1.7rem}
+
+/* ══ PROGRESSION ══ */
+.prog{margin:8px 0 16px;padding:0 1rem}
+.prog-row{display:flex;justify-content:space-between;font-size:.83rem;color:var(--mu);font-weight:600;margin-bottom:7px}
+.prog-bg{background:var(--Bm);border-radius:99px;height:7px}
+.prog-fill{background:linear-gradient(90deg,var(--B),#60A5FA);height:7px;border-radius:99px;transition:width .4s cubic-bezier(.4,0,.2,1)}
+
+/* ══ QUESTION CARD ══ */
+.qcard{
+  background:var(--sur);
+  border:1.5px solid var(--bor);
+  border-left:4px solid var(--B);
+  border-radius:0 var(--r) var(--r) 0;
+  padding:16px 18px 8px;
+  box-shadow:var(--sh);
+  margin:14px 1rem 0;
+  transition:border-color .15s;
+}
+.qcard:focus-within{border-color:var(--B);box-shadow:var(--shm)}
+.qmeta{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.qnum{
+  background:var(--B);color:#fff;
+  font-size:.72rem;font-weight:800;padding:3px 10px;border-radius:99px;
+}
+.qtype{color:var(--mu);font-size:.76rem;font-weight:600}
+.qpts{
+  background:linear-gradient(135deg,#F1F5F9,#E8EDF8);
+  color:var(--mu);font-size:.72rem;font-weight:700;
+  padding:3px 10px;border-radius:99px;margin-left:auto;
+}
+.qtxt{font-size:15px;font-weight:700;color:var(--txt);margin:0 0 12px;line-height:1.5}
+
+/* ══ RADIO / CHECKBOX ══ */
+.stRadio>div{gap:6px!important}
+.stRadio>div>label{
+  background:var(--bg)!important;border:2px solid var(--bor)!important;
+  border-radius:var(--r2)!important;padding:12px 15px!important;
+  font-size:14.5px!important;font-weight:500!important;min-height:48px!important;
+  cursor:pointer!important;transition:all .15s!important;
+  display:flex!important;align-items:center!important;
+}
+.stRadio>div>label:hover{border-color:var(--B)!important;background:var(--Bl)!important;color:var(--Bd)!important}
+div[data-testid="stCheckbox"] label{
+  background:var(--bg);border:2px solid var(--bor);
+  border-radius:var(--r2);padding:12px 15px;
+  font-size:14.5px!important;font-weight:500!important;min-height:48px;
+  margin-bottom:6px;display:flex;align-items:center;
+  transition:all .15s;cursor:pointer;
+}
 div[data-testid="stCheckbox"] label:hover{border-color:var(--B);background:var(--Bl)}
-/* ── Score ── */
-.scard{background:linear-gradient(145deg,var(--Bd),var(--B));border-radius:18px;padding:32px 24px;text-align:center;box-shadow:var(--shb);margin:8px 0 20px}
-.se{font-size:3rem;margin-bottom:4px}.sn{color:rgba(255,255,255,.8);font-size:.95rem;margin:0 0 6px}
-.sv{color:#fff;font-size:2.8rem;font-weight:900;margin:0;letter-spacing:-1px}
-.sp{color:rgba(255,255,255,.9);font-size:1.5rem;font-weight:700;margin:2px 0 6px}
-.sq{color:rgba(255,255,255,.6);font-size:.85rem;margin:0}
-.subcard{background:var(--Bl);border:2px solid var(--Bm);border-radius:16px;padding:30px 24px;text-align:center;margin:8px 0 20px}
-/* ── Cards ── */
-.card{background:var(--sur);border:1.5px solid var(--bor);border-radius:var(--r);padding:16px 18px;margin:8px 0;box-shadow:var(--sh)}
-.slbl{font-size:.7rem;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.1em;margin:20px 0 8px}
-/* ── KPI cards ── */
-.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 20px}
-.kpi{border-radius:14px;padding:18px 16px;box-shadow:var(--sh);position:relative;overflow:hidden}
-.kpi::before{content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;opacity:.12}
-.kpi-b{background:linear-gradient(135deg,var(--Bl),#fff);border:1.5px solid var(--Bm)}.kpi-b::before{background:var(--B)}
-.kpi-g{background:linear-gradient(135deg,#D1FAE5,#fff);border:1.5px solid #A7F3D0}.kpi-g::before{background:var(--G)}
-.kpi-o{background:linear-gradient(135deg,#FEF3C7,#fff);border:1.5px solid #FDE68A}.kpi-o::before{background:var(--O)}
-.kpi-p{background:linear-gradient(135deg,#EDE9FE,#fff);border:1.5px solid #DDD6FE}.kpi-p::before{background:var(--P)}
-.kpi-icon{font-size:1.6rem;margin-bottom:8px}
-.kpi-val{font-size:2rem;font-weight:900;margin:0;line-height:1}
-.kpi-b .kpi-val{color:var(--B)}.kpi-g .kpi-val{color:var(--G)}.kpi-o .kpi-val{color:#B45309}.kpi-p .kpi-val{color:var(--P)}
-.kpi-lbl{font-size:.78rem;font-weight:600;color:var(--mu);margin:3px 0 0;text-transform:uppercase;letter-spacing:.06em}
-/* ── Activité récente ── */
-.activity-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bor)}
-.activity-item:last-child{border-bottom:none}
-.act-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0;background:var(--Bm);color:var(--B)}
-.act-name{font-weight:600;font-size:14px;color:var(--txt)}
-.act-quiz{font-size:.78rem;color:var(--mu)}
-.act-score{margin-left:auto;text-align:right}
-.act-pct{font-size:1rem;font-weight:800}
-.act-time{font-size:.72rem;color:var(--mu)}
-/* ── Agent card admin ── */
-.agcard{background:var(--sur);border:1.5px solid var(--bor);border-radius:var(--r);padding:12px 14px;margin:6px 0;box-shadow:var(--sh)}
-.agtop{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.av{width:36px;height:36px;border-radius:50%;background:var(--Bm);color:var(--B);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
-/* ── Badges ── */
-.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:.72rem;font-weight:700}
-.bg{background:#D1FAE5;color:#065F46}.bo{background:#FEF3C7;color:#92400E}
+
+/* ══ SCORE FINAL ══ */
+.scard{
+  background:linear-gradient(145deg,var(--Bx) 0%,#1D4ED8 50%,#3B82F6 100%);
+  border-radius:22px;padding:36px 28px;text-align:center;
+  box-shadow:var(--shb);margin:1rem 1rem 1.5rem;
+  position:relative;overflow:hidden;
+}
+.scard::before{content:'';position:absolute;top:-50px;right:-50px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.06)}
+.se{font-size:3.2rem;margin-bottom:6px;position:relative;z-index:1}
+.sn{color:rgba(255,255,255,.75);font-size:.95rem;font-weight:500;margin:0 0 6px;position:relative;z-index:1}
+.sv{color:#fff;font-size:3rem;font-weight:900;margin:0;letter-spacing:-2px;position:relative;z-index:1}
+.sp{color:rgba(255,255,255,.85);font-size:1.6rem;font-weight:700;margin:2px 0 8px;position:relative;z-index:1}
+.sq{color:rgba(255,255,255,.55);font-size:.88rem;margin:0;position:relative;z-index:1}
+.subcard{
+  background:linear-gradient(135deg,var(--Bl),#fff);
+  border:2px solid var(--Bm);border-radius:18px;
+  padding:32px 24px;text-align:center;
+  margin:1rem 1rem 1.5rem;box-shadow:var(--sh);
+}
+
+/* ══ CARDS GÉNÉRIQUES ══ */
+.card{
+  background:var(--sur);border:1.5px solid var(--bor);
+  border-radius:var(--r);padding:18px 20px;margin:10px 1rem;
+  box-shadow:var(--sh);
+}
+.slbl{
+  font-size:.7rem;font-weight:800;color:var(--mu2);
+  text-transform:uppercase;letter-spacing:.12em;
+  margin:22px 1rem 9px;display:block;
+}
+
+/* ══ KPI DASHBOARD ══ */
+.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:0 1rem 20px}
+.kpi{
+  border-radius:var(--r);padding:20px 18px;
+  box-shadow:var(--sh);position:relative;overflow:hidden;
+  transition:transform .2s,box-shadow .2s;
+}
+.kpi:hover{transform:translateY(-2px);box-shadow:var(--shm)}
+.kpi::after{
+  content:'';position:absolute;bottom:-25px;right:-25px;
+  width:90px;height:90px;border-radius:50%;opacity:.1;
+}
+.kpi-b{background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #BFDBFE}
+.kpi-b::after{background:var(--B)}
+.kpi-g{background:linear-gradient(135deg,#ECFDF5,#D1FAE5);border:1.5px solid #A7F3D0}
+.kpi-g::after{background:var(--G)}
+.kpi-o{background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border:1.5px solid #FDE68A}
+.kpi-o::after{background:var(--O)}
+.kpi-p{background:linear-gradient(135deg,#F5F3FF,#EDE9FE);border:1.5px solid #DDD6FE}
+.kpi-p::after{background:var(--P)}
+.kpi-icon{font-size:1.7rem;margin-bottom:10px;display:block}
+.kpi-val{font-size:2.1rem;font-weight:900;margin:0;letter-spacing:-1px;line-height:1}
+.kpi-b .kpi-val{color:var(--B)}.kpi-g .kpi-val{color:var(--Gd)}
+.kpi-o .kpi-val{color:var(--Od)}.kpi-p .kpi-val{color:#7C3AED}
+.kpi-lbl{font-size:.72rem;font-weight:700;color:var(--mu);margin:5px 0 0;text-transform:uppercase;letter-spacing:.08em}
+
+/* ══ ACTIVITÉ ══ */
+.act-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bor)}
+.act-item:last-child{border-bottom:none}
+.act-av{
+  width:38px;height:38px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:13px;
+  background:linear-gradient(135deg,var(--Bm),var(--Bl));color:var(--B);
+}
+.act-name{font-weight:700;font-size:14px;color:var(--txt)}
+.act-quiz{font-size:.78rem;color:var(--mu);margin-top:1px}
+.act-score{margin-left:auto;text-align:right;flex-shrink:0}
+.act-pct{font-size:1.05rem;font-weight:800}
+.act-time{font-size:.72rem;color:var(--mu2)}
+
+/* ══ AGENT CARD ADMIN ══ */
+.agcard{
+  background:var(--sur);border:1.5px solid var(--bor);
+  border-radius:var(--r);padding:14px 16px;margin:6px 0;
+  box-shadow:var(--sh);transition:border-color .15s;
+}
+.agcard:hover{border-color:var(--Bm)}
+.agtop{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.av{
+  width:38px;height:38px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--Bm),var(--Bl));color:var(--B);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:13px;
+}
+
+/* ══ BADGES ══ */
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:.72rem;font-weight:700}
+.bg{background:var(--Gl);color:var(--Gd)}.bo{background:var(--Ol);color:var(--Od)}
 .bb{background:var(--Bm);color:var(--Bd)}.bgr{background:#F1F5F9;color:#475569}
-/* ── Barre de score quiz ── */
-.qz-bar-wrap{margin:6px 0}
-.qz-bar-row{display:flex;align-items:center;gap:10px;margin:5px 0}
-.qz-bar-lbl{font-size:.82rem;font-weight:600;color:var(--txt);min-width:120px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qz-bar-bg{flex:1;background:var(--Bm);border-radius:99px;height:10px;overflow:hidden}
-.qz-bar-fill{height:10px;border-radius:99px;background:linear-gradient(90deg,var(--B),#60A5FA)}
-.qz-bar-val{font-size:.82rem;font-weight:700;color:var(--B);min-width:38px;text-align:right}
-/* ── Tabs ── */
-.stTabs [data-baseweb="tab-list"]{gap:4px!important;border-bottom:2px solid var(--bor)!important}
-.stTabs [data-baseweb="tab"]{font-family:'Outfit',sans-serif!important;font-size:13.5px!important;font-weight:600!important;padding:9px 14px!important;border-radius:8px 8px 0 0!important}
-/* ── Expander ── */
-div[data-testid="stExpander"]{border:1.5px solid var(--bor)!important;border-radius:var(--r)!important;margin:5px 0!important;overflow:hidden!important;box-shadow:var(--sh)!important}
-div[data-testid="stExpander"] summary{font-family:'Outfit',sans-serif!important;font-weight:600!important;font-size:14px!important;padding:13px 16px!important}
+.br{background:var(--Rl);color:var(--Rd)}
+
+/* ══ BARRE SCORES ══ */
+.qzbar{margin:6px 0}
+.qzbar-row{display:flex;align-items:center;gap:10px;margin:6px 0}
+.qzbar-lbl{font-size:.82rem;font-weight:600;color:var(--txt);min-width:100px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qzbar-bg{flex:1;background:var(--Bm);border-radius:99px;height:10px;overflow:hidden}
+.qzbar-fill{height:10px;border-radius:99px}
+.qzbar-val{font-size:.82rem;font-weight:800;min-width:38px;text-align:right}
+
+/* ══ TABS ══ */
+.stTabs [data-baseweb="tab-list"]{gap:4px!important;border-bottom:2px solid var(--bor)!important;padding:0 1rem!important}
+.stTabs [data-baseweb="tab"]{
+  font-family:'Plus Jakarta Sans',sans-serif!important;
+  font-size:13px!important;font-weight:700!important;
+  padding:10px 14px!important;border-radius:8px 8px 0 0!important;
+  letter-spacing:-.01em!important;
+}
+
+/* ══ EXPANDER ══ */
+div[data-testid="stExpander"]{
+  border:2px solid var(--bor)!important;border-radius:var(--r)!important;
+  margin:6px 0!important;overflow:hidden!important;box-shadow:var(--sh)!important;
+  transition:border-color .15s!important;
+}
+div[data-testid="stExpander"]:hover{border-color:var(--Bm)!important}
+div[data-testid="stExpander"] summary{
+  font-family:'Plus Jakarta Sans',sans-serif!important;
+  font-weight:700!important;font-size:14px!important;padding:14px 18px!important;
+}
+
+/* ══ FORM ══ */
 div[data-testid="stForm"]{border:none!important;padding:0!important}
-hr{border:none!important;border-top:1.5px solid var(--bor)!important;margin:18px 0!important}
-.stAlert{border-radius:var(--r)!important;font-family:'Outfit',sans-serif!important}
+hr{border:none!important;border-top:2px solid var(--bor)!important;margin:20px 1rem!important}
+.stAlert{border-radius:var(--r)!important;font-family:'Plus Jakarta Sans',sans-serif!important;margin:0 1rem!important}
+
+/* ══ SCROLLBAR ══ */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--Bm);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:var(--B)}
 </style>""", unsafe_allow_html=True)
 
 init_db()
@@ -160,174 +362,248 @@ for k,v in _D.items():
 def go(p): st.session_state.page=p; st.rerun()
 
 
-# ── Persistance de session via URL params (survit au refresh) ─────────────────
+# ── Persistance de session (survit au refresh) ───────────────────────────────
 
 def _admin_token():
-    """Token de session admin basé sur le mot de passe + date du jour."""
     day = datetime.now().strftime("%Y%m%d")
-    raw = f"{config.ADMIN_PASSWORD}{day}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
+    return hashlib.md5(f"{config.ADMIN_PASSWORD}{day}".encode()).hexdigest()[:16]
 
 
 def _save_state():
-    """Écrit l'état minimal dans les query params."""
+    """Encode l'état dans l'URL — ne déclenche PAS de rerun."""
     try:
-        params = {}
+        qp = dict(st.query_params)
+        changed = False
+        def _set(k, v):
+            nonlocal changed
+            if qp.get(k) != v: qp[k] = v; changed = True
+        def _del(k):
+            nonlocal changed
+            if k in qp: del qp[k]; changed = True
+
         if st.session_state.current_agent:
-            params["a"] = str(st.session_state.current_agent["id"])
+            _set("a", str(st.session_state.current_agent["id"]))
+        else:
+            _del("a"); _del("s"); _del("p")
+
         if st.session_state.admin_logged:
-            params["t"] = _admin_token()
+            _set("t", _admin_token())
+        else:
+            _del("t")
+
         if st.session_state.session_id and not st.session_state.quiz_submitted:
-            params["s"] = str(st.session_state.session_id)
-        # Nettoyer les params obsolètes
-        if not st.session_state.current_agent and "a" in st.query_params:
-            del st.query_params["a"]
-        if not st.session_state.admin_logged and "t" in st.query_params:
-            del st.query_params["t"]
-        if (not st.session_state.session_id or st.session_state.quiz_submitted) and "s" in st.query_params:
-            del st.query_params["s"]
-        st.query_params.update(params)
+            _set("s", str(st.session_state.session_id))
+        else:
+            _del("s")
+
+        if st.session_state.page not in ("home",):
+            _set("p", st.session_state.page)
+        else:
+            _del("p")
+
+        if changed:
+            for k,v in list(qp.items()):
+                st.query_params[k] = v
+            for k in list(st.query_params.keys()):
+                if k not in qp:
+                    del st.query_params[k]
     except Exception:
         pass
 
 
 def _restore_state():
-    """Restaure l'état depuis les query params au démarrage."""
+    """Lit l'URL et restaure l'état — appelé UNE SEULE FOIS au démarrage."""
+    if st.session_state.get("_restored"):
+        return
+    st.session_state["_restored"] = True
     try:
         qp = st.query_params
 
-        # Restaurer l'agent
+        # 1. Restaurer l'agent
         if "a" in qp and not st.session_state.current_agent:
-            agent = get_agent_by_id(int(qp["a"]))
-            if agent:
-                st.session_state.current_agent = agent
+            try:
+                agent = get_agent_by_id(int(qp["a"]))
+                if agent:
+                    st.session_state.current_agent = agent
+            except Exception:
+                pass
 
-        # Restaurer le login admin
+        # 2. Restaurer le login admin
         if "t" in qp and not st.session_state.admin_logged:
-            if qp["t"] == _admin_token():
-                st.session_state.admin_logged = True
+            try:
+                if qp["t"] == _admin_token():
+                    st.session_state.admin_logged = True
+            except Exception:
+                pass
 
-        # Restaurer une session de quiz en cours
+        # 3. Restaurer le quiz en cours
         if "s" in qp and st.session_state.current_agent and not st.session_state.session_id:
-            from database import get_incomplete_session, get_quiz
-            agent = st.session_state.current_agent
-            # Chercher la session incomplète par ID
-            sid = int(qp["s"])
-            sess = _fetchone_session(sid)
-            if sess and not sess.get("completed"):
-                quiz = get_quiz(sess["quiz_id"])
-                if quiz:
-                    questions = get_questions(quiz["id"])
-                    try:
-                        raw = sess.get("answers_json") or "{}"
-                        answers = json.loads(raw)
-                        answers = {int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
-                    except Exception:
-                        answers = {}
-                    remaining = quiz["duree_minutes"]*60 - (time.time() - float(sess.get("start_time_epoch") or time.time()))
-                    if remaining > 10:
-                        st.session_state.current_quiz = quiz
-                        st.session_state.quiz_questions = questions
-                        st.session_state.quiz_start_time = float(sess.get("start_time_epoch") or time.time())
-                        st.session_state.quiz_answers = answers
-                        st.session_state.session_id = sid
-                        st.session_state.page = "agent_quiz"
+            try:
+                sid = int(qp["s"])
+                sess = get_session_by_id(sid)
+                if sess and not sess.get("completed"):
+                    quiz = get_quiz(sess["quiz_id"])
+                    if quiz:
+                        epoch = float(sess.get("start_time_epoch") or time.time())
+                        remaining = quiz["duree_minutes"] * 60 - (time.time() - epoch)
+                        if remaining > 15:
+                            questions = get_questions(quiz["id"])
+                            try:
+                                answers = json.loads(sess.get("answers_json") or "{}")
+                                answers = {int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+                            except Exception:
+                                answers = {}
+                            st.session_state.current_quiz      = quiz
+                            st.session_state.quiz_questions    = questions
+                            st.session_state.quiz_start_time   = epoch
+                            st.session_state.quiz_answers      = answers
+                            st.session_state.session_id        = sid
+                            st.session_state.quiz_submitted    = False
+                            st.session_state.page              = "agent_quiz"
+                        else:
+                            # Temps écoulé — soumettre automatiquement
+                            try:
+                                questions = get_questions(quiz["id"])
+                                answers = json.loads(sess.get("answers_json") or "{}")
+                                answers = {int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+                                score, records = _calc(questions, answers)
+                                submit_session(sid, score, records)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+        # 4. Restaurer la page (après avoir restauré l'état)
+        if "p" in qp and st.session_state.page == "home":
+            page = qp["p"]
+            # Vérifier que l'état requis est présent
+            if page in ("agent_quiz_code", "agent_quiz", "agent_result") and st.session_state.current_agent:
+                st.session_state.page = page
+            elif page in ("admin_dashboard", "admin_quiz_edit") and st.session_state.admin_logged:
+                st.session_state.page = page
     except Exception:
         pass
 
 
-def _fetchone_session(sid):
-    """Récupère une session par son ID."""
-    from database import _fetchone as _db_fetchone
-    return _db_fetchone("SELECT * FROM sessions WHERE id=?", (sid,))
-
-
-# Restaurer au démarrage
+# ── Appel unique au démarrage ─────────────────────────────────────────────────
 _restore_state()
 
 
 def _generate_quiz_pdf(quiz, questions):
-    """Génère un PDF du quiz avec les bonnes réponses via HTML/CSS."""
-    from io import BytesIO
-    import textwrap
+    """Génère un vrai fichier PDF du corrigé via fpdf2."""
+    from fpdf import FPDF
+    import io
 
-    ICONS = {"single": "⭕", "multiple": "☑️", "numeric": "🔢", "text": "📝"}
-    TYPE_LABELS = {"single": "Choix unique", "multiple": "Choix multiple",
-                   "numeric": "Valeur numérique", "text": "Texte libre"}
+    TYPES = {"single":"Choix unique","multiple":"Choix multiple",
+             "numeric":"Valeur numérique","text":"Texte libre"}
 
-    rows = ""
+    class PDF(FPDF):
+        def header(self):
+            # Bande bleue en haut
+            self.set_fill_color(30, 58, 138)
+            self.rect(0, 0, 210, 38, "F")
+            self.set_text_color(255, 255, 255)
+            self.set_font("Helvetica", "B", 17)
+            self.set_xy(12, 7)
+            titre = quiz["titre"][:58]
+            self.cell(186, 9, titre, ln=True)
+            self.set_font("Helvetica", "", 10)
+            self.set_xy(12, 18)
+            total_pts = sum(q["points"] for q in questions)
+            info = f"Code: {quiz['code']}   |   Duree: {quiz['duree_minutes']} min   |   {len(questions)} question(s)   |   {total_pts:.0f} pt(s)"
+            self.cell(186, 6, info, ln=True)
+            if quiz.get("description"):
+                self.set_xy(12, 26)
+                self.set_font("Helvetica", "I", 9)
+                self.set_text_color(200, 220, 255)
+                self.cell(186, 6, quiz["description"][:80], ln=True)
+            self.set_text_color(0, 0, 0)
+            self.ln(16)
+
+        def footer(self):
+            self.set_y(-14)
+            self.set_font("Helvetica", "I", 8)
+            self.set_text_color(150, 150, 150)
+            now = datetime.now().strftime("%d/%m/%Y %H:%M")
+            self.cell(0, 8, f"QuizAgent CI  —  Genere le {now}  —  Page {self.page_no()}", align="C")
+
+    pdf = PDF()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
     for i, q in enumerate(questions):
         pts = f"{q['points']:.0f} pt" + ("s" if q["points"] != 1 else "")
-        rows += f"""
-        <div class="question">
-          <div class="q-header">
-            <span class="q-num">Q{i+1}</span>
-            <span class="q-type">{ICONS[q["type"]]} {TYPE_LABELS[q["type"]]}</span>
-            <span class="q-pts">{pts}</span>
-          </div>
-          <div class="q-text">{q["texte"]}</div>"""
+        type_lbl = TYPES.get(q["type"], q["type"])
 
+        # Numéro + type
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(239, 246, 255)
+        pdf.set_text_color(29, 78, 216)
+        pdf.cell(20, 6, f"  Q{i+1}", fill=True, border=0)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(60, 6, type_lbl, border=0)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(0, 6, pts, align="R", ln=True, border=0)
+
+        # Texte de la question — bande bleu gauche
+        pdf.set_fill_color(29, 78, 216)
+        pdf.rect(pdf.get_x(), pdf.get_y(), 3, 8, "F")
+        pdf.set_x(pdf.get_x() + 5)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(15, 23, 42)
+        # multi_cell pour les longs textes
+        x_before = pdf.get_x()
+        pdf.multi_cell(175, 6, q["texte"], border=0)
+        pdf.ln(3)
+
+        # Options / réponses
         if q["type"] in ("single", "multiple"):
-            rows += '<div class="options">'
             for o in q["options"]:
-                cls = "opt-correct" if o["is_correct"] else "opt-normal"
-                icon = "✅" if o["is_correct"] else "☐"
-                rows += f'<div class="{cls}">{icon} {o["texte"]}</div>'
-            rows += '</div>'
+                if o["is_correct"]:
+                    pdf.set_fill_color(209, 250, 229)
+                    pdf.set_draw_color(5, 150, 105)
+                    pdf.set_text_color(6, 95, 70)
+                    icon = "OK "
+                    font_style = "B"
+                else:
+                    pdf.set_fill_color(248, 250, 255)
+                    pdf.set_draw_color(226, 232, 244)
+                    pdf.set_text_color(15, 23, 42)
+                    icon = "   "
+                    font_style = ""
+                pdf.set_x(16)
+                pdf.set_font("Helvetica", font_style, 10)
+                pdf.multi_cell(174, 6, f"{icon}{o['texte']}", border=1, fill=True)
+                pdf.ln(1)
+
         elif q["type"] == "numeric":
-            rows += f'<div class="answer-box">Réponse : <b>{q["reponse_correcte_num"]}</b></div>'
+            rep = q.get("reponse_correcte_num")
+            pdf.set_x(16)
+            pdf.set_fill_color(209, 250, 229)
+            pdf.set_text_color(6, 95, 70)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(174, 7, f"  Reponse correcte : {rep}", fill=True, border=1, ln=True)
+
         elif q["type"] == "text":
-            raw = q.get("reponse_correcte_txt") or ""
+            raw = (q.get("reponse_correcte_txt") or "").strip()
+            pdf.set_x(16)
+            pdf.set_fill_color(209, 250, 229)
+            pdf.set_text_color(6, 95, 70)
+            pdf.set_font("Helvetica", "B", 10)
             if raw:
-                rows += f'<div class="answer-box">Réponse(s) acceptée(s) : <b>{raw}</b></div>'
+                pdf.multi_cell(174, 7, f"  Reponse(s) : {raw}", fill=True, border=1)
             else:
-                rows += '<div class="answer-box" style="color:#888">Question ouverte</div>'
+                pdf.set_fill_color(241, 245, 249)
+                pdf.set_text_color(100, 116, 139)
+                pdf.cell(174, 7, "  Question ouverte (pas de correction automatique)", fill=True, border=1, ln=True)
 
-        rows += "</div>"
+        pdf.ln(6)
 
-    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
-    total_pts = sum(q["points"] for q in questions)
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap');
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: 'Outfit', Arial, sans-serif; color: #0F172A; background: #fff; padding: 32px; font-size: 13px; }}
-  .header {{ background: linear-gradient(135deg, #1E3A8A, #1D4ED8); color: white; padding: 24px 28px; border-radius: 12px; margin-bottom: 24px; }}
-  .header h1 {{ font-size: 22px; font-weight: 800; margin-bottom: 4px; }}
-  .header .meta {{ font-size: 12px; opacity: .8; display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }}
-  .header .code {{ background: rgba(255,255,255,.2); padding: 3px 12px; border-radius: 99px; font-weight: 700; }}
-  .question {{ background: #F8FAFF; border: 1.5px solid #E2E8F4; border-left: 4px solid #1D4ED8; border-radius: 0 10px 10px 0; padding: 14px 16px; margin-bottom: 14px; page-break-inside: avoid; }}
-  .q-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }}
-  .q-num {{ background: #EFF6FF; color: #1D4ED8; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 99px; }}
-  .q-type {{ color: #64748B; font-size: 11px; }}
-  .q-pts {{ background: #F1F5F9; color: #64748B; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; margin-left: auto; }}
-  .q-text {{ font-size: 14px; font-weight: 600; margin-bottom: 10px; line-height: 1.45; }}
-  .options {{ display: flex; flex-direction: column; gap: 5px; }}
-  .opt-normal {{ padding: 7px 12px; background: white; border: 1px solid #E2E8F4; border-radius: 7px; font-size: 13px; }}
-  .opt-correct {{ padding: 7px 12px; background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; font-size: 13px; font-weight: 600; color: #065F46; }}
-  .answer-box {{ background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; padding: 7px 12px; color: #065F46; font-size: 13px; }}
-  .footer {{ text-align: center; color: #94A3B8; font-size: 11px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #E2E8F4; }}
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>{quiz["titre"]}</h1>
-    <div class="meta">
-      <span class="code">Code : {quiz["code"]}</span>
-      <span>⏱ {quiz["duree_minutes"]} minutes</span>
-      <span>📝 {len(questions)} question(s)</span>
-      <span>🏆 {total_pts:.0f} point(s) au total</span>
-    </div>
-    {f'<div style="margin-top:8px;font-size:12px;opacity:.75">{quiz["description"]}</div>' if quiz.get("description") else ""}
-  </div>
-  {rows}
-  <div class="footer">Document généré le {now} — QuizAgent CI</div>
-</body>
-</html>"""
-    return html.encode("utf-8")
+    buf = io.BytesIO()
+    pdf.output(buf)
+    return buf.getvalue()
 
 
 def topbar(t,i="📝"): st.markdown(f'<div class="topbar"><span style="font-size:1.2rem">{i}</span><span class="tt">{t}</span></div>',unsafe_allow_html=True)
@@ -879,8 +1155,8 @@ def _tab_quizzes():
                 st.download_button(
                     "📄  Télécharger le corrigé PDF",
                     data=pdf_bytes,
-                    file_name=f"corrige_{quiz['code']}.html",
-                    mime="text/html",
+                    file_name=f"corrige_{quiz['code']}.pdf",
+                    mime="application/pdf",
                     key=f"pdf_{quiz['id']}",
                     use_container_width=True,
                 )
