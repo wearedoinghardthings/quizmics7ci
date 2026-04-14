@@ -1,554 +1,143 @@
 """
-app.py — QuizAgent CI  |  Design Premium
+app.py — QuizAgent CI
 """
 import streamlit as st
 import pandas as pd
-import json, time, io, re, requests, hashlib
-from datetime import datetime
+import json, time, io, re, requests
+from datetime import datetime, timedelta
 
-import config
+import config, hashlib
+from functools import lru_cache
 from database import (
     init_db, search_agents, get_all_agents, upsert_agents,
     set_agent_published, publish_all_agents, unpublish_all_agents,
-    delete_agent, add_agent_manual, get_agent_by_id, get_session_by_id,
+    get_agent_by_id, delete_agent, add_agent_manual,
     get_quiz_by_code, get_all_quizzes, get_quiz, create_quiz, update_quiz, delete_quiz,
     get_questions, add_question, delete_question, reorder_questions,
-    create_session, save_quiz_progress,
+    create_session, save_quiz_progress, get_incomplete_session,
     submit_session, get_results, session_already_completed, get_stats,
 )
 
-st.set_page_config(
-    page_title=config.APP_TITLE,
-    page_icon="📝",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
+                   layout="centered", initial_sidebar_state="collapsed")
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  DESIGN SYSTEM — CSS agressif qui écrase Streamlit
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+#  CSS + DESIGN SYSTEM
+# ═══════════════════════════════════════════════════════════════
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-/* ── Variables ── */
-:root {
-  --blue: #2563EB; --blue-d: #1D4ED8; --blue-x: #1E3A8A;
-  --blue-l: #EFF6FF; --blue-m: #BFDBFE;
-  --green: #059669; --green-l: #D1FAE5;
-  --orange: #D97706; --orange-l: #FEF3C7;
-  --red: #DC2626; --red-l: #FEE2E2;
-  --purple: #7C3AED; --purple-l: #EDE9FE;
-  --bg: #F0F4FF; --surface: #FFFFFF;
-  --border: #E2E8F4; --border2: #CBD5E1;
-  --text: #0F172A; --text2: #475569; --text3: #94A3B8;
-  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.05);
-  --shadow-md: 0 4px 20px rgba(0,0,0,.1), 0 1px 6px rgba(0,0,0,.06);
-  --shadow-blue: 0 8px 32px rgba(37,99,235,.25);
-  --radius: 14px; --radius-sm: 10px;
+*,*::before,*::after{box-sizing:border-box}
+html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-family:'Outfit',sans-serif!important}
+#MainMenu,footer,header,.stDeployButton{display:none!important}
+.main,.main>div,section.main,.appview-container,.block-container{overflow:visible!important}
+.block-container{padding:0 1rem 5rem!important;max-width:640px!important;margin:0 auto!important}
+:root{
+  --B:#1D4ED8;--Bd:#1E3A8A;--Bl:#EFF6FF;--Bm:#DBEAFE;
+  --G:#059669;--O:#D97706;--R:#DC2626;--P:#7C3AED;
+  --bg:#F8FAFF;--sur:#FFFFFF;--bor:#E2E8F4;--txt:#0F172A;--mu:#64748B;
+  --r:12px;--sh:0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.05);
+  --shb:0 4px 20px rgba(29,78,216,.18)
 }
-
-/* ── Reset & Font ── */
-*, *::before, *::after { box-sizing: border-box; }
-html, body { font-family: 'Inter', -apple-system, sans-serif !important; background: var(--bg) !important; }
-[class*="css"], p, span, div, label, input, textarea, button, select,
-h1, h2, h3, h4, h5, h6, .stMarkdown p, .stMarkdown li {
-  font-family: 'Inter', -apple-system, sans-serif !important;
-}
-
-/* ── Masquer chrome Streamlit ── */
-#MainMenu, footer, header, .stDeployButton,
-[data-testid="stToolbar"], [data-testid="stDecoration"],
-[data-testid="stStatusWidget"], .stAppDeployButton { display: none !important; }
-
-/* ── Layout ── */
-.stApp { background: var(--bg) !important; }
-.main .block-container {
-  max-width: 600px !important;
-  margin: 0 auto !important;
-  padding: 0 0 80px 0 !important;
-  background: transparent !important;
-}
-section[data-testid="stSidebar"] { display: none !important; }
-
-/* ── Tous les boutons ── */
-.stButton { margin: 4px 0 !important; }
-.stButton > button {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.01em !important;
-  width: 100% !important;
-  min-height: 52px !important;
-  border-radius: var(--radius-sm) !important;
-  padding: 14px 20px !important;
-  cursor: pointer !important;
-  transition: all 0.18s ease !important;
-  border: none !important;
-  outline: none !important;
-}
-/* Bouton primaire */
-.stButton > button[kind="primary"],
-.stButton > button[data-testid="baseButton-primary"] {
-  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-d) 100%) !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 15px rgba(37,99,235,.4) !important;
-  border: none !important;
-}
-.stButton > button[kind="primary"]:hover,
-.stButton > button[data-testid="baseButton-primary"]:hover {
-  background: linear-gradient(135deg, var(--blue-d) 0%, var(--blue-x) 100%) !important;
-  box-shadow: 0 6px 22px rgba(37,99,235,.5) !important;
-  transform: translateY(-1px) !important;
-}
-.stButton > button[kind="primary"]:active { transform: translateY(0) !important; }
-/* Bouton secondaire */
-.stButton > button:not([kind="primary"]),
-.stButton > button[data-testid="baseButton-secondary"] {
-  background: var(--surface) !important;
-  color: var(--text) !important;
-  border: 2px solid var(--border) !important;
-  box-shadow: var(--shadow) !important;
-}
-.stButton > button:not([kind="primary"]):hover {
-  border-color: var(--blue) !important;
-  color: var(--blue) !important;
-  background: var(--blue-l) !important;
-}
-
-/* ── Inputs ── */
-div[data-baseweb="input"] input,
-div[data-baseweb="textarea"] textarea,
-.stTextInput input, .stTextArea textarea {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 16px !important;
-  font-weight: 500 !important;
-  border-radius: var(--radius-sm) !important;
-  border: 2px solid var(--border) !important;
-  padding: 13px 16px !important;
-  background: var(--surface) !important;
-  color: var(--text) !important;
-  box-shadow: var(--shadow) !important;
-  transition: border-color 0.15s, box-shadow 0.15s !important;
-}
-div[data-baseweb="input"] input:focus,
-div[data-baseweb="textarea"] textarea:focus,
-.stTextInput input:focus, .stTextArea textarea:focus {
-  border-color: var(--blue) !important;
-  box-shadow: 0 0 0 4px rgba(37,99,235,.12) !important;
-  outline: none !important;
-}
-div[data-testid="stNumberInput"] input {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 16px !important;
-  border: 2px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  padding: 12px 14px !important;
-}
-.stTextInput label, .stTextArea label, .stSelectbox label,
-.stNumberInput label, div[data-testid="stWidgetLabel"] p {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 11px !important;
-  font-weight: 800 !important;
-  color: var(--text3) !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.1em !important;
-}
-
-/* ── Selectbox ── */
-div[data-baseweb="select"] > div {
-  border-radius: var(--radius-sm) !important;
-  border: 2px solid var(--border) !important;
-  background: var(--surface) !important;
-  font-size: 15px !important;
-  font-family: 'Inter', sans-serif !important;
-}
-
-/* ── Radio ── */
-div[data-testid="stRadio"] > div {
-  gap: 8px !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-div[data-testid="stRadio"] label {
-  background: var(--surface) !important;
-  border: 2px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  padding: 13px 16px !important;
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  min-height: 50px !important;
-  cursor: pointer !important;
-  transition: all 0.15s !important;
-  display: flex !important;
-  align-items: center !important;
-  color: var(--text) !important;
-  margin: 0 !important;
-}
-div[data-testid="stRadio"] label:hover {
-  border-color: var(--blue) !important;
-  background: var(--blue-l) !important;
-  color: var(--blue-d) !important;
-}
-
-/* ── Checkbox ── */
-div[data-testid="stCheckbox"] label {
-  background: var(--surface) !important;
-  border: 2px solid var(--border) !important;
-  border-radius: var(--radius-sm) !important;
-  padding: 13px 16px !important;
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  min-height: 50px !important;
-  margin-bottom: 6px !important;
-  display: flex !important;
-  align-items: center !important;
-  cursor: pointer !important;
-  transition: all 0.15s !important;
-}
-div[data-testid="stCheckbox"] label:hover {
-  border-color: var(--blue) !important;
-  background: var(--blue-l) !important;
-}
-
-/* ── Tabs ── */
-div[data-baseweb="tab-list"] {
-  background: transparent !important;
-  border-bottom: 2px solid var(--border) !important;
-  gap: 4px !important;
-  padding: 0 16px !important;
-}
-button[data-baseweb="tab"] {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.01em !important;
-  padding: 10px 16px !important;
-  border-radius: 8px 8px 0 0 !important;
-  color: var(--text2) !important;
-}
-button[data-baseweb="tab"][aria-selected="true"] {
-  color: var(--blue) !important;
-  background: var(--blue-l) !important;
-}
-
-/* ── Expander ── */
-div[data-testid="stExpander"] {
-  background: var(--surface) !important;
-  border: 2px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-  margin: 6px 0 !important;
-  overflow: hidden !important;
-  box-shadow: var(--shadow) !important;
-}
-div[data-testid="stExpander"]:hover { border-color: var(--blue-m) !important; }
-div[data-testid="stExpander"] details summary {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  padding: 14px 18px !important;
-  color: var(--text) !important;
-}
-div[data-testid="stExpander"] > div:last-child { padding: 0 16px 14px !important; }
-
-/* ── Form ── */
-div[data-testid="stForm"] { border: none !important; padding: 0 !important; background: transparent !important; }
-div[data-testid="stFormSubmitButton"] button {
-  background: linear-gradient(135deg, var(--blue), var(--blue-d)) !important;
-  color: white !important;
-  border: none !important;
-  box-shadow: 0 4px 15px rgba(37,99,235,.35) !important;
-}
-
-/* ── Alertes ── */
-div[data-testid="stAlert"] {
-  border-radius: var(--radius-sm) !important;
-  font-family: 'Inter', sans-serif !important;
-  font-size: 14px !important;
-  margin: 6px 0 !important;
-}
-
-/* ── Dataframe ── */
-div[data-testid="stDataFrame"] { border-radius: var(--radius) !important; overflow: hidden !important; }
-
-/* ── Download button ── */
-div[data-testid="stDownloadButton"] button {
-  background: linear-gradient(135deg, var(--green), #047857) !important;
-  color: white !important;
-  border: none !important;
-  box-shadow: 0 4px 14px rgba(5,150,105,.3) !important;
-}
-
-/* ── HR ── */
-hr { border: none !important; border-top: 2px solid var(--border) !important; margin: 20px 0 !important; }
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--blue-m); border-radius: 99px; }
-
-/* ══════════════════════════════════════════════════
-   COMPOSANTS HTML CUSTOM
-══════════════════════════════════════════════════ */
-
-/* ── Top nav ── */
-.app-header {
-  background: linear-gradient(135deg, var(--blue-x) 0%, var(--blue-d) 100%);
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 0;
-  box-shadow: 0 2px 20px rgba(30,58,138,.2);
-}
-.app-header-icon { font-size: 1.4rem; }
-.app-header-title { color: #fff; font-size: 1rem; font-weight: 800; letter-spacing: -0.02em; }
-.app-header-sub { color: rgba(255,255,255,.5); font-size: .78rem; margin-left: auto; }
-
+/* ── Topbar ── */
+.topbar{background:var(--Bd);margin:0 -1rem 1.5rem -1rem;padding:14px 20px;display:flex;align-items:center;gap:10px}
+.tt{color:#fff;font-size:1.05rem;font-weight:700}
 /* ── Hero ── */
-.hero-wrap {
-  background: linear-gradient(145deg, var(--blue-x) 0%, var(--blue-d) 45%, #3B82F6 100%);
-  margin: 0;
-  padding: 52px 28px 48px;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-}
-.hero-wrap::before {
-  content: '';
-  position: absolute; top: -80px; right: -80px;
-  width: 300px; height: 300px; border-radius: 50%;
-  background: rgba(255,255,255,.05);
-  pointer-events: none;
-}
-.hero-wrap::after {
-  content: '';
-  position: absolute; bottom: -100px; left: -60px;
-  width: 280px; height: 280px; border-radius: 50%;
-  background: rgba(255,255,255,.04);
-  pointer-events: none;
-}
-.hero-badge {
-  display: inline-block;
-  background: rgba(255,255,255,.15);
-  color: rgba(255,255,255,.9);
-  font-size: .75rem; font-weight: 700;
-  padding: 5px 14px; border-radius: 99px;
-  margin-bottom: 16px;
-  letter-spacing: .06em; text-transform: uppercase;
-  position: relative; z-index: 1;
-}
-.hero-icon { font-size: 3.4rem; margin-bottom: 12px; position: relative; z-index: 1; }
-.hero-title {
-  color: #fff; font-size: 2.2rem; font-weight: 900;
-  margin: 0 0 8px; letter-spacing: -.05em; line-height: 1.1;
-  position: relative; z-index: 1;
-}
-.hero-sub { color: rgba(255,255,255,.72); font-size: 1rem; margin: 0; position: relative; z-index: 1; }
-.hero-org { color: rgba(255,255,255,.45); font-size: .85rem; margin-top: 6px; position: relative; z-index: 1; }
-.hero-btns { padding: 0 20px; margin-top: -1px; background: var(--bg); padding-top: 20px; }
-
-/* ── Section label ── */
-.section-label {
-  font-size: 11px; font-weight: 800; color: var(--text3);
-  text-transform: uppercase; letter-spacing: .1em;
-  padding: 0 20px; margin: 24px 0 10px; display: block;
-}
-
+.hero{background:linear-gradient(145deg,var(--Bd),var(--B));border-radius:18px;padding:36px 24px 32px;text-align:center;margin-bottom:20px;box-shadow:var(--shb)}
+.hi{font-size:2.8rem;margin-bottom:6px}.ht{color:#fff;font-size:1.85rem;font-weight:900;margin:0 0 5px;letter-spacing:-.5px}.hs{color:rgba(255,255,255,.72);font-size:.95rem;margin:0}
+/* ── Boutons ── */
+.stButton>button{font-family:'Outfit',sans-serif!important;font-weight:600!important;font-size:15px!important;border-radius:10px!important;padding:13px 20px!important;width:100%!important;transition:all .15s!important;min-height:48px!important}
+.stButton>button[kind="primary"]{background:var(--B)!important;border:none!important;color:#fff!important;box-shadow:0 3px 10px rgba(29,78,216,.3)!important}
+.stButton>button[kind="primary"]:hover{background:var(--Bd)!important;transform:translateY(-1px)!important}
+.stButton>button:not([kind="primary"]){background:var(--sur)!important;border:1.5px solid var(--bor)!important;color:var(--txt)!important}
+/* ── Inputs ── */
+.stTextInput>div>div>input,.stTextArea>div>div>textarea,.stNumberInput>div>div>input{font-family:'Outfit',sans-serif!important;font-size:16px!important;border-radius:10px!important;border:1.5px solid var(--bor)!important;padding:12px 14px!important}
+.stTextInput>div>div>input:focus,.stTextArea>div>div>textarea:focus{border-color:var(--B)!important;box-shadow:0 0 0 3px rgba(29,78,216,.1)!important}
+.stTextInput label,.stTextArea label,.stSelectbox label,.stNumberInput label{font-size:11px!important;font-weight:700!important;color:var(--mu)!important;text-transform:uppercase!important;letter-spacing:.08em!important}
+/* ── Timer fixe ── */
+#quiz-timer-bar{position:fixed!important;top:0!important;left:0!important;right:0!important;z-index:99999!important;background:rgba(248,250,255,.97)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;border-bottom:1px solid var(--bor)!important;box-shadow:0 2px 12px rgba(15,23,42,.08)!important;padding:8px 1rem 6px!important}
+#quiz-timer-bar .inner{max-width:620px;margin:0 auto}
+.tbox{border-radius:12px;padding:12px 20px;text-align:center;display:flex;align-items:center;justify-content:center;gap:14px}
+.tn{background:linear-gradient(135deg,var(--Bd),var(--B));box-shadow:0 3px 12px rgba(29,78,216,.25)}
+.tw{background:linear-gradient(135deg,#92400E,var(--O));box-shadow:0 3px 12px rgba(217,119,6,.25)}
+.td{background:linear-gradient(135deg,#7F1D1D,var(--R));box-shadow:0 3px 12px rgba(220,38,38,.3);animation:pulse .7s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.82}}
+.ttime{color:#fff;font-size:2.2rem;font-weight:900;letter-spacing:4px;margin:0;line-height:1}
+.tlbl{color:rgba(255,255,255,.75);font-size:.75rem;font-weight:600;margin:3px 0 0;text-transform:uppercase;letter-spacing:.08em}
+.ticon{font-size:1.6rem}
+/* ── Progression ── */
+.prog{margin:6px 0 14px}.prog-row{display:flex;justify-content:space-between;font-size:.82rem;color:var(--mu);font-weight:500;margin-bottom:5px}
+.prog-bg{background:var(--Bm);border-radius:99px;height:6px}.prog-fill{background:var(--B);height:6px;border-radius:99px;transition:width .3s}
+/* ── Question ── */
+.qcard{background:var(--sur);border:1.5px solid var(--bor);border-left:4px solid var(--B);border-radius:0 var(--r) var(--r) 0;padding:14px 16px 4px;box-shadow:var(--sh);margin:12px 0 0}
+.qmeta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
+.qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
+.qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
+.qtxt{font-size:15px;font-weight:600;color:var(--txt);margin:0 0 10px;line-height:1.45}
+/* ── Radio/Checkbox ── */
+.stRadio>div{gap:5px!important}
+.stRadio>div>label{background:var(--bg)!important;border:1.5px solid var(--bor)!important;border-radius:10px!important;padding:11px 14px!important;font-size:14.5px!important;font-weight:500!important;min-height:46px!important;cursor:pointer!important;transition:all .12s!important}
+.stRadio>div>label:hover{border-color:var(--B)!important;background:var(--Bl)!important}
+div[data-testid="stCheckbox"] label{background:var(--bg);border:1.5px solid var(--bor);border-radius:10px;padding:11px 14px;font-size:14.5px!important;font-weight:500!important;min-height:46px;margin-bottom:5px;transition:all .12s}
+div[data-testid="stCheckbox"] label:hover{border-color:var(--B);background:var(--Bl)}
+/* ── Score ── */
+.scard{background:linear-gradient(145deg,var(--Bd),var(--B));border-radius:18px;padding:32px 24px;text-align:center;box-shadow:var(--shb);margin:8px 0 20px}
+.se{font-size:3rem;margin-bottom:4px}.sn{color:rgba(255,255,255,.8);font-size:.95rem;margin:0 0 6px}
+.sv{color:#fff;font-size:2.8rem;font-weight:900;margin:0;letter-spacing:-1px}
+.sp{color:rgba(255,255,255,.9);font-size:1.5rem;font-weight:700;margin:2px 0 6px}
+.sq{color:rgba(255,255,255,.6);font-size:.85rem;margin:0}
+.subcard{background:var(--Bl);border:2px solid var(--Bm);border-radius:16px;padding:30px 24px;text-align:center;margin:8px 0 20px}
 /* ── Cards ── */
-.ui-card {
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  margin: 0 16px 12px;
-  box-shadow: var(--shadow);
-}
-
-/* ── Agent button ── */
-.agent-btn-wrap { padding: 0 16px; margin-bottom: 6px; }
-
-/* ── Agent info card ── */
-.agent-info {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  margin: 0 16px 16px;
-  box-shadow: var(--shadow);
-}
-.agent-avatar {
-  width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
-  background: linear-gradient(135deg, #BFDBFE, var(--blue-l));
-  color: var(--blue-d); font-weight: 800; font-size: 15px;
-  display: flex; align-items: center; justify-content: center;
-}
-.agent-name { font-size: 1.05rem; font-weight: 800; color: var(--text); }
-.agent-mat { font-size: .82rem; color: var(--text3); margin-top: 2px; }
-
-/* ── TIMER FIXE ── */
-#qtbar {
-  position: fixed !important; top: 0 !important;
-  left: 0 !important; right: 0 !important;
-  z-index: 999999 !important;
-  background: rgba(240,244,255,.96) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border-bottom: 1px solid var(--border) !important;
-  box-shadow: 0 2px 20px rgba(0,0,0,.07) !important;
-  padding: 8px 16px 7px !important;
-}
-#qtbar .qti { max-width: 600px; margin: 0 auto; }
-.qtbox {
-  border-radius: var(--radius-sm);
-  padding: 12px 20px;
-  display: flex; align-items: center; gap: 16px;
-}
-.qt-n { background: linear-gradient(135deg, var(--blue-x), var(--blue)); box-shadow: 0 4px 16px rgba(37,99,235,.3); }
-.qt-w { background: linear-gradient(135deg, #92400E, var(--orange)); box-shadow: 0 4px 16px rgba(217,119,6,.3); }
-.qt-d { background: linear-gradient(135deg, #7F1D1D, var(--red)); box-shadow: 0 4px 16px rgba(220,38,38,.35); animation: hb .65s infinite; }
-@keyframes hb { 0%,100%{opacity:1} 50%{opacity:.82} }
-.qt-ico { font-size: 1.8rem; }
-.qt-time { color: #fff; font-size: 2.2rem; font-weight: 900; letter-spacing: 5px; margin: 0; line-height: 1; font-variant-numeric: tabular-nums; }
-.qt-lbl { color: rgba(255,255,255,.72); font-size: .7rem; font-weight: 700; margin: 4px 0 0; text-transform: uppercase; letter-spacing: .1em; }
-
-/* ── Progress ── */
-.prog-wrap { padding: 0 16px; margin: 10px 0 16px; }
-.prog-top { display: flex; justify-content: space-between; font-size: .82rem; color: var(--text2); font-weight: 600; margin-bottom: 8px; }
-.prog-bg { background: #DBEAFE; border-radius: 99px; height: 7px; overflow: hidden; }
-.prog-fill { background: linear-gradient(90deg, var(--blue), #60A5FA); height: 7px; border-radius: 99px; transition: width .4s ease; }
-
-/* ── Question card ── */
-.qcard {
-  background: var(--surface);
-  border-left: 5px solid var(--blue);
-  border-top: 1.5px solid var(--border);
-  border-right: 1.5px solid var(--border);
-  border-bottom: 1.5px solid var(--border);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  padding: 16px 18px 10px;
-  margin: 14px 16px 0;
-  box-shadow: var(--shadow);
-}
-.qmeta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.qbadge-num { background: var(--blue); color: #fff; font-size: .7rem; font-weight: 900; padding: 3px 10px; border-radius: 99px; }
-.qbadge-type { color: var(--text3); font-size: .75rem; font-weight: 600; }
-.qbadge-pts { background: #F1F5F9; color: var(--text2); font-size: .7rem; font-weight: 800; padding: 3px 10px; border-radius: 99px; margin-left: auto; }
-.qtext { font-size: 15.5px; font-weight: 700; color: var(--text); margin: 0 0 12px; line-height: 1.5; }
-.qinput-wrap { padding: 0 0 4px; }
-
-/* ── Score card ── */
-.score-wrap {
-  background: linear-gradient(145deg, var(--blue-x) 0%, var(--blue-d) 50%, #3B82F6 100%);
-  border-radius: 22px;
-  padding: 40px 28px;
-  margin: 16px 16px 20px;
-  text-align: center;
-  box-shadow: var(--shadow-blue);
-  position: relative; overflow: hidden;
-}
-.score-wrap::before { content:''; position:absolute; top:-60px; right:-60px; width:220px; height:220px; border-radius:50%; background:rgba(255,255,255,.06); }
-.sw-emoji { font-size: 3.4rem; margin-bottom: 8px; position: relative; z-index: 1; }
-.sw-name { color: rgba(255,255,255,.75); font-size: .95rem; margin: 0 0 8px; font-weight: 500; position: relative; z-index: 1; }
-.sw-val { color: #fff; font-size: 3.2rem; font-weight: 900; margin: 0; letter-spacing: -2px; position: relative; z-index: 1; }
-.sw-pct { color: rgba(255,255,255,.88); font-size: 1.6rem; font-weight: 800; margin: 2px 0 8px; position: relative; z-index: 1; }
-.sw-quiz { color: rgba(255,255,255,.5); font-size: .88rem; margin: 0; position: relative; z-index: 1; }
-.submitted-wrap {
-  background: linear-gradient(135deg, var(--blue-l), #fff);
-  border: 2px solid var(--blue-m);
-  border-radius: 20px;
-  padding: 36px 24px;
-  margin: 16px 16px 20px;
-  text-align: center;
-  box-shadow: var(--shadow);
-}
-
-/* ── Admin Login ── */
-.login-wrap {
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius);
-  padding: 28px 24px;
-  margin: 24px 16px;
-  box-shadow: var(--shadow-md);
-}
-
-/* ── KPI Grid ── */
-.kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 0 16px; margin-bottom: 20px; }
-.kpi {
-  border-radius: var(--radius);
-  padding: 20px 18px;
-  box-shadow: var(--shadow);
-  position: relative; overflow: hidden;
-  cursor: default;
-  transition: transform .2s, box-shadow .2s;
-}
-.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.kpi::after { content:''; position:absolute; bottom:-28px; right:-28px; width:100px; height:100px; border-radius:50%; opacity:.08; }
-.kpi-b { background: linear-gradient(135deg,#EFF6FF,#DBEAFE); border: 1.5px solid #BFDBFE; }
-.kpi-b::after { background: var(--blue); }
-.kpi-g { background: linear-gradient(135deg,#ECFDF5,#D1FAE5); border: 1.5px solid #6EE7B7; }
-.kpi-g::after { background: var(--green); }
-.kpi-o { background: linear-gradient(135deg,#FFFBEB,#FEF3C7); border: 1.5px solid #FCD34D; }
-.kpi-o::after { background: var(--orange); }
-.kpi-p { background: linear-gradient(135deg,#F5F3FF,#EDE9FE); border: 1.5px solid #C4B5FD; }
-.kpi-p::after { background: var(--purple); }
-.kpi-ico { font-size: 1.8rem; margin-bottom: 10px; display: block; }
-.kpi-val { font-size: 2.2rem; font-weight: 900; margin: 0; letter-spacing: -1px; line-height: 1; }
-.kpi-b .kpi-val{color:var(--blue)} .kpi-g .kpi-val{color:var(--green)}
-.kpi-o .kpi-val{color:var(--orange)} .kpi-p .kpi-val{color:var(--purple)}
-.kpi-lbl { font-size: .68rem; font-weight: 800; color: var(--text3); margin: 5px 0 0; text-transform: uppercase; letter-spacing: .1em; }
-
-/* ── Stat double ── */
-.stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px; margin-bottom: 12px; }
-.stat-box { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 18px; text-align: center; box-shadow: var(--shadow); }
-.stat-val { font-size: 2rem; font-weight: 900; margin: 0; letter-spacing: -1px; }
-.stat-lbl { font-size: .7rem; font-weight: 700; color: var(--text3); margin: 4px 0 0; text-transform: uppercase; letter-spacing: .08em; }
-
-/* ── Score bars ── */
-.score-bars { padding: 0 16px; }
-.sb-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-.sb-lbl { font-size: .82rem; font-weight: 600; color: var(--text); min-width: 110px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-bg { flex: 1; background: #DBEAFE; border-radius: 99px; height: 10px; overflow: hidden; }
-.sb-fill { height: 10px; border-radius: 99px; }
-.sb-val { font-size: .82rem; font-weight: 800; min-width: 36px; text-align: right; }
-
-/* ── Activity feed ── */
-.activity { padding: 0 16px; }
-.act-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
-.act-item:last-child { border-bottom: none; }
-.act-av { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, #BFDBFE, var(--blue-l)); color: var(--blue-d); font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; }
-.act-name { font-weight: 700; font-size: 14px; color: var(--text); }
-.act-quiz { font-size: .77rem; color: var(--text3); margin-top: 1px; }
-.act-right { margin-left: auto; text-align: right; flex-shrink: 0; }
-.act-pct { font-size: 1rem; font-weight: 900; }
-.act-time { font-size: .7rem; color: var(--text3); }
-
+.card{background:var(--sur);border:1.5px solid var(--bor);border-radius:var(--r);padding:16px 18px;margin:8px 0;box-shadow:var(--sh)}
+.slbl{font-size:.7rem;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.1em;margin:20px 0 8px}
+/* ── KPI cards ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 20px}
+.kpi{border-radius:14px;padding:18px 16px;box-shadow:var(--sh);position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;opacity:.12}
+.kpi-b{background:linear-gradient(135deg,var(--Bl),#fff);border:1.5px solid var(--Bm)}.kpi-b::before{background:var(--B)}
+.kpi-g{background:linear-gradient(135deg,#D1FAE5,#fff);border:1.5px solid #A7F3D0}.kpi-g::before{background:var(--G)}
+.kpi-o{background:linear-gradient(135deg,#FEF3C7,#fff);border:1.5px solid #FDE68A}.kpi-o::before{background:var(--O)}
+.kpi-p{background:linear-gradient(135deg,#EDE9FE,#fff);border:1.5px solid #DDD6FE}.kpi-p::before{background:var(--P)}
+.kpi-icon{font-size:1.6rem;margin-bottom:8px}
+.kpi-val{font-size:2rem;font-weight:900;margin:0;line-height:1}
+.kpi-b .kpi-val{color:var(--B)}.kpi-g .kpi-val{color:var(--G)}.kpi-o .kpi-val{color:#B45309}.kpi-p .kpi-val{color:var(--P)}
+.kpi-lbl{font-size:.78rem;font-weight:600;color:var(--mu);margin:3px 0 0;text-transform:uppercase;letter-spacing:.06em}
+/* ── Activité récente ── */
+.activity-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--bor)}
+.activity-item:last-child{border-bottom:none}
+.act-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0;background:var(--Bm);color:var(--B)}
+.act-name{font-weight:600;font-size:14px;color:var(--txt)}
+.act-quiz{font-size:.78rem;color:var(--mu)}
+.act-score{margin-left:auto;text-align:right}
+.act-pct{font-size:1rem;font-weight:800}
+.act-time{font-size:.72rem;color:var(--mu)}
 /* ── Agent card admin ── */
-.ag-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin: 6px 0; box-shadow: var(--shadow); }
-.ag-card:hover { border-color: var(--blue-m); }
-.ag-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.ag-av { width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, #BFDBFE, var(--blue-l)); color: var(--blue-d); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
-
-/* ── Quiz card admin ── */
-.qz-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 8px 0; box-shadow: var(--shadow); }
-.qz-card-header { padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
-.qz-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.qz-dot-on { background: var(--green); box-shadow: 0 0 0 3px var(--green-l); }
-.qz-dot-off { background: var(--text3); }
-.qz-title { font-size: 1rem; font-weight: 800; color: var(--text); }
-.qz-code { font-size: .75rem; font-weight: 700; color: var(--text3); margin-top: 1px; }
-
+.agcard{background:var(--sur);border:1.5px solid var(--bor);border-radius:var(--r);padding:12px 14px;margin:6px 0;box-shadow:var(--sh)}
+.agtop{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.av{width:36px;height:36px;border-radius:50%;background:var(--Bm);color:var(--B);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
 /* ── Badges ── */
-.bdg { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: .7rem; font-weight: 800; }
-.bdg-g { background: var(--green-l); color: var(--green); }
-.bdg-o { background: var(--orange-l); color: var(--orange); }
-.bdg-b { background: var(--blue-l); color: var(--blue-d); }
-.bdg-gr { background: #F1F5F9; color: var(--text2); }
-.bdg-r { background: var(--red-l); color: var(--red); }
-</style>
-""", unsafe_allow_html=True)
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:.72rem;font-weight:700}
+.bg{background:#D1FAE5;color:#065F46}.bo{background:#FEF3C7;color:#92400E}
+.bb{background:var(--Bm);color:var(--Bd)}.bgr{background:#F1F5F9;color:#475569}
+/* ── Barre de score quiz ── */
+.qz-bar-wrap{margin:6px 0}
+.qz-bar-row{display:flex;align-items:center;gap:10px;margin:5px 0}
+.qz-bar-lbl{font-size:.82rem;font-weight:600;color:var(--txt);min-width:120px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qz-bar-bg{flex:1;background:var(--Bm);border-radius:99px;height:10px;overflow:hidden}
+.qz-bar-fill{height:10px;border-radius:99px;background:linear-gradient(90deg,var(--B),#60A5FA)}
+.qz-bar-val{font-size:.82rem;font-weight:700;color:var(--B);min-width:38px;text-align:right}
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"]{gap:4px!important;border-bottom:2px solid var(--bor)!important}
+.stTabs [data-baseweb="tab"]{font-family:'Outfit',sans-serif!important;font-size:13.5px!important;font-weight:600!important;padding:9px 14px!important;border-radius:8px 8px 0 0!important}
+/* ── Expander ── */
+div[data-testid="stExpander"]{border:1.5px solid var(--bor)!important;border-radius:var(--r)!important;margin:5px 0!important;overflow:hidden!important;box-shadow:var(--sh)!important}
+div[data-testid="stExpander"] summary{font-family:'Outfit',sans-serif!important;font-weight:600!important;font-size:14px!important;padding:13px 16px!important}
+div[data-testid="stForm"]{border:none!important;padding:0!important}
+hr{border:none!important;border-top:1.5px solid var(--bor)!important;margin:18px 0!important}
+.stAlert{border-radius:var(--r)!important;font-family:'Outfit',sans-serif!important}
+</style>""", unsafe_allow_html=True)
 
 init_db()
 
@@ -559,874 +148,865 @@ except ImportError:
     _AR = False
 
 _D = {
-    "page": "home", "current_agent": None, "current_quiz": None,
-    "quiz_questions": None, "quiz_start_time": None, "quiz_answers": {},
-    "session_id": None, "admin_logged": False, "quiz_submitted": False,
-    "final_score": None, "edit_quiz_id": None, "adding_q_type": "single",
-    "_restored": False,
+    "page":"home","current_agent":None,"current_quiz":None,
+    "quiz_questions":None,"quiz_start_time":None,"quiz_answers":{},
+    "session_id":None,"admin_logged":False,"quiz_submitted":False,
+    "final_score":None,"edit_quiz_id":None,"adding_q_type":"single",
 }
-for k, v in _D.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+for k,v in _D.items():
+    if k not in st.session_state: st.session_state[k]=v
 
 
-def go(p):
-    st.session_state.page = p
-    st.rerun()
-
-def S(k): return st.session_state[k]
-def SET(k, v): st.session_state[k] = v
+def go(p): st.session_state.page=p; st.rerun()
 
 
-# ── Helpers HTML ──────────────────────────────────────────────────────────────
-def section(t): st.markdown(f'<span class="section-label">{t}</span>', unsafe_allow_html=True)
-def bdg(t, c="b"): return f'<span class="bdg bdg-{c}">{t}</span>'
-def pad(n=1): st.markdown(f'<div style="height:{n*8}px"></div>', unsafe_allow_html=True)
+# ── Persistance de session via URL params (survit au refresh) ─────────────────
+
+def _admin_token():
+    """Token de session admin basé sur le mot de passe + date du jour."""
+    day = datetime.now().strftime("%Y%m%d")
+    raw = f"{config.ADMIN_PASSWORD}{day}"
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
-# ── Persistance session ───────────────────────────────────────────────────────
-def _tok():
-    return hashlib.md5(f"{config.ADMIN_PASSWORD}{datetime.now().strftime('%Y%m%d')}".encode()).hexdigest()[:16]
-
-def _save():
+def _save_state():
+    """Écrit l'état minimal dans les query params."""
     try:
-        to_set = {}
-        if S("current_agent"): to_set["a"] = str(S("current_agent")["id"])
-        if S("admin_logged"):   to_set["t"] = _tok()
-        if S("session_id") and not S("quiz_submitted"): to_set["s"] = str(S("session_id"))
-        if S("page") != "home": to_set["p"] = S("page")
-        for k, v in to_set.items():
-            if st.query_params.get(k) != v:
-                st.query_params[k] = v
-        for k in list(st.query_params.keys()):
-            if k not in to_set:
-                del st.query_params[k]
+        params = {}
+        if st.session_state.current_agent:
+            params["a"] = str(st.session_state.current_agent["id"])
+        if st.session_state.admin_logged:
+            params["t"] = _admin_token()
+        if st.session_state.session_id and not st.session_state.quiz_submitted:
+            params["s"] = str(st.session_state.session_id)
+        # Nettoyer les params obsolètes
+        if not st.session_state.current_agent and "a" in st.query_params:
+            del st.query_params["a"]
+        if not st.session_state.admin_logged and "t" in st.query_params:
+            del st.query_params["t"]
+        if (not st.session_state.session_id or st.session_state.quiz_submitted) and "s" in st.query_params:
+            del st.query_params["s"]
+        st.query_params.update(params)
     except Exception:
         pass
 
-def _restore():
-    if S("_restored"): return
-    SET("_restored", True)
+
+def _restore_state():
+    """Restaure l'état depuis les query params au démarrage."""
     try:
         qp = st.query_params
-        if "a" in qp and not S("current_agent"):
-            a = get_agent_by_id(int(qp["a"]))
-            if a: SET("current_agent", a)
-        if "t" in qp and not S("admin_logged"):
-            if qp["t"] == _tok(): SET("admin_logged", True)
-        if "s" in qp and S("current_agent") and not S("session_id"):
+
+        # Restaurer l'agent
+        if "a" in qp and not st.session_state.current_agent:
+            agent = get_agent_by_id(int(qp["a"]))
+            if agent:
+                st.session_state.current_agent = agent
+
+        # Restaurer le login admin
+        if "t" in qp and not st.session_state.admin_logged:
+            if qp["t"] == _admin_token():
+                st.session_state.admin_logged = True
+
+        # Restaurer une session de quiz en cours
+        if "s" in qp and st.session_state.current_agent and not st.session_state.session_id:
+            from database import get_incomplete_session, get_quiz
+            agent = st.session_state.current_agent
+            # Chercher la session incomplète par ID
             sid = int(qp["s"])
-            sess = get_session_by_id(sid)
+            sess = _fetchone_session(sid)
             if sess and not sess.get("completed"):
                 quiz = get_quiz(sess["quiz_id"])
                 if quiz:
-                    epoch = float(sess.get("start_time_epoch") or time.time())
-                    remaining = quiz["duree_minutes"] * 60 - (time.time() - epoch)
-                    if remaining > 15:
-                        qs = get_questions(quiz["id"])
-                        try:
-                            ans = json.loads(sess.get("answers_json") or "{}")
-                            ans = {int(k) if str(k).isdigit() else k: v for k, v in ans.items()}
-                        except Exception:
-                            ans = {}
-                        SET("current_quiz", quiz); SET("quiz_questions", qs)
-                        SET("quiz_start_time", epoch); SET("quiz_answers", ans)
-                        SET("session_id", sid); SET("quiz_submitted", False)
-                        SET("page", "agent_quiz")
-        if "p" in qp and S("page") == "home":
-            pg = qp["p"]
-            if pg in ("agent_quiz_code", "agent_quiz") and S("current_agent"):
-                SET("page", pg)
-            elif pg in ("admin_dashboard", "admin_quiz_edit") and S("admin_logged"):
-                SET("page", pg)
+                    questions = get_questions(quiz["id"])
+                    try:
+                        raw = sess.get("answers_json") or "{}"
+                        answers = json.loads(raw)
+                        answers = {int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+                    except Exception:
+                        answers = {}
+                    remaining = quiz["duree_minutes"]*60 - (time.time() - float(sess.get("start_time_epoch") or time.time()))
+                    if remaining > 10:
+                        st.session_state.current_quiz = quiz
+                        st.session_state.quiz_questions = questions
+                        st.session_state.quiz_start_time = float(sess.get("start_time_epoch") or time.time())
+                        st.session_state.quiz_answers = answers
+                        st.session_state.session_id = sid
+                        st.session_state.page = "agent_quiz"
     except Exception:
         pass
 
-_restore()
+
+def _fetchone_session(sid):
+    """Récupère une session par son ID."""
+    from database import _fetchone as _db_fetchone
+    return _db_fetchone("SELECT * FROM sessions WHERE id=?", (sid,))
 
 
-# ── PDF export ────────────────────────────────────────────────────────────────
-def _make_pdf(quiz, questions):
-    from fpdf import FPDF
+# Restaurer au démarrage
+_restore_state()
 
-    TYPES = {"single": "Choix unique", "multiple": "Choix multiple",
-             "numeric": "Valeur numerique", "text": "Texte libre"}
 
-    class PDF(FPDF):
-        def header(self):
-            self.set_fill_color(30, 58, 138)
-            self.rect(0, 0, 210, 40, "F")
-            self.set_text_color(255, 255, 255)
-            self.set_font("Helvetica", "B", 18)
-            self.set_xy(12, 8)
-            self.cell(186, 9, quiz["titre"][:55], ln=True)
-            self.set_font("Helvetica", "", 10)
-            self.set_xy(12, 20)
-            total = sum(q["points"] for q in questions)
-            self.cell(186, 6, f"Code: {quiz['code']}   |   {quiz['duree_minutes']} min   |   {len(questions)} questions   |   {total:.0f} point(s)", ln=True)
-            if quiz.get("description"):
-                self.set_xy(12, 29)
-                self.set_font("Helvetica", "I", 9)
-                self.set_text_color(180, 210, 255)
-                self.cell(186, 6, quiz["description"][:80], ln=True)
-            self.set_text_color(0, 0, 0)
-            self.ln(14)
+def _generate_quiz_pdf(quiz, questions):
+    """Génère un PDF du quiz avec les bonnes réponses via HTML/CSS."""
+    from io import BytesIO
+    import textwrap
 
-        def footer(self):
-            self.set_y(-13)
-            self.set_font("Helvetica", "I", 8)
-            self.set_text_color(160, 160, 160)
-            self.cell(0, 8, f"QuizAgent CI  —  {datetime.now().strftime('%d/%m/%Y %H:%M')}  —  Page {self.page_no()}", align="C")
+    ICONS = {"single": "⭕", "multiple": "☑️", "numeric": "🔢", "text": "📝"}
+    TYPE_LABELS = {"single": "Choix unique", "multiple": "Choix multiple",
+                   "numeric": "Valeur numérique", "text": "Texte libre"}
 
-    pdf = PDF()
-    pdf.set_auto_page_break(True, margin=16)
-    pdf.add_page()
-
+    rows = ""
     for i, q in enumerate(questions):
         pts = f"{q['points']:.0f} pt" + ("s" if q["points"] != 1 else "")
-
-        # Header question
-        pdf.set_fill_color(239, 246, 255)
-        pdf.set_draw_color(191, 219, 254)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(29, 78, 216)
-        pdf.cell(20, 7, f"  Q{i+1}", fill=True, border="LTB")
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(90, 7, TYPES.get(q["type"], ""), border="TB")
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(0, 7, pts, align="R", border="RTB", ln=True)
-
-        # Barre bleue + texte
-        pdf.set_fill_color(37, 99, 235)
-        x0, y0 = pdf.get_x(), pdf.get_y()
-        pdf.rect(x0, y0, 3, 10, "F")
-        pdf.set_x(x0 + 5)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(15, 23, 42)
-        pdf.multi_cell(174, 6, q["texte"])
-        pdf.ln(3)
+        rows += f"""
+        <div class="question">
+          <div class="q-header">
+            <span class="q-num">Q{i+1}</span>
+            <span class="q-type">{ICONS[q["type"]]} {TYPE_LABELS[q["type"]]}</span>
+            <span class="q-pts">{pts}</span>
+          </div>
+          <div class="q-text">{q["texte"]}</div>"""
 
         if q["type"] in ("single", "multiple"):
+            rows += '<div class="options">'
             for o in q["options"]:
-                if o["is_correct"]:
-                    pdf.set_fill_color(209, 250, 229)
-                    pdf.set_draw_color(5, 150, 105)
-                    pdf.set_text_color(6, 95, 70)
-                    txt, style = "  ✓  " + o["texte"], "B"
-                else:
-                    pdf.set_fill_color(249, 250, 251)
-                    pdf.set_draw_color(226, 232, 244)
-                    pdf.set_text_color(15, 23, 42)
-                    txt, style = "  ○  " + o["texte"], ""
-                pdf.set_x(16)
-                pdf.set_font("Helvetica", style, 10)
-                pdf.multi_cell(172, 7, txt, border=1, fill=True)
-                pdf.ln(1)
+                cls = "opt-correct" if o["is_correct"] else "opt-normal"
+                icon = "✅" if o["is_correct"] else "☐"
+                rows += f'<div class="{cls}">{icon} {o["texte"]}</div>'
+            rows += '</div>'
         elif q["type"] == "numeric":
-            pdf.set_x(16)
-            pdf.set_fill_color(209, 250, 229)
-            pdf.set_text_color(6, 95, 70)
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(172, 8, f"  Reponse : {q.get('reponse_correcte_num')}", fill=True, border=1, ln=True)
+            rows += f'<div class="answer-box">Réponse : <b>{q["reponse_correcte_num"]}</b></div>'
         elif q["type"] == "text":
-            raw = (q.get("reponse_correcte_txt") or "").strip()
-            pdf.set_x(16)
-            pdf.set_font("Helvetica", "B", 10)
+            raw = q.get("reponse_correcte_txt") or ""
             if raw:
-                pdf.set_fill_color(209, 250, 229)
-                pdf.set_text_color(6, 95, 70)
-                pdf.multi_cell(172, 8, f"  Reponses : {raw}", fill=True, border=1)
+                rows += f'<div class="answer-box">Réponse(s) acceptée(s) : <b>{raw}</b></div>'
             else:
-                pdf.set_fill_color(241, 245, 249)
-                pdf.set_text_color(100, 116, 139)
-                pdf.cell(172, 8, "  Question ouverte", fill=True, border=1, ln=True)
+                rows += '<div class="answer-box" style="color:#888">Question ouverte</div>'
 
-        pdf.ln(7)
+        rows += "</div>"
 
-    buf = io.BytesIO()
-    pdf.output(buf)
-    return buf.getvalue()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  PAGE — HOME
-# ══════════════════════════════════════════════════════════════════════════════
-def render_home():
-    org = f'<p class="hero-org">{config.ORG_NAME}</p>' if config.ORG_NAME else ""
-    st.markdown(f"""
-    <div class="hero-wrap">
-      <div class="hero-badge">📋 Plateforme d'évaluation</div>
-      <div class="hero-icon">📝</div>
-      <h1 class="hero-title">{config.APP_TITLE}</h1>
-      <p class="hero-sub">{config.APP_SUBTITLE}</p>
-      {org}
+    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
+    total_pts = sum(q["points"] for q in questions)
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap');
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Outfit', Arial, sans-serif; color: #0F172A; background: #fff; padding: 32px; font-size: 13px; }}
+  .header {{ background: linear-gradient(135deg, #1E3A8A, #1D4ED8); color: white; padding: 24px 28px; border-radius: 12px; margin-bottom: 24px; }}
+  .header h1 {{ font-size: 22px; font-weight: 800; margin-bottom: 4px; }}
+  .header .meta {{ font-size: 12px; opacity: .8; display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }}
+  .header .code {{ background: rgba(255,255,255,.2); padding: 3px 12px; border-radius: 99px; font-weight: 700; }}
+  .question {{ background: #F8FAFF; border: 1.5px solid #E2E8F4; border-left: 4px solid #1D4ED8; border-radius: 0 10px 10px 0; padding: 14px 16px; margin-bottom: 14px; page-break-inside: avoid; }}
+  .q-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }}
+  .q-num {{ background: #EFF6FF; color: #1D4ED8; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 99px; }}
+  .q-type {{ color: #64748B; font-size: 11px; }}
+  .q-pts {{ background: #F1F5F9; color: #64748B; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; margin-left: auto; }}
+  .q-text {{ font-size: 14px; font-weight: 600; margin-bottom: 10px; line-height: 1.45; }}
+  .options {{ display: flex; flex-direction: column; gap: 5px; }}
+  .opt-normal {{ padding: 7px 12px; background: white; border: 1px solid #E2E8F4; border-radius: 7px; font-size: 13px; }}
+  .opt-correct {{ padding: 7px 12px; background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; font-size: 13px; font-weight: 600; color: #065F46; }}
+  .answer-box {{ background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; padding: 7px 12px; color: #065F46; font-size: 13px; }}
+  .footer {{ text-align: center; color: #94A3B8; font-size: 11px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #E2E8F4; }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>{quiz["titre"]}</h1>
+    <div class="meta">
+      <span class="code">Code : {quiz["code"]}</span>
+      <span>⏱ {quiz["duree_minutes"]} minutes</span>
+      <span>📝 {len(questions)} question(s)</span>
+      <span>🏆 {total_pts:.0f} point(s) au total</span>
     </div>
-    <div class="hero-btns">
-    """, unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
+    {f'<div style="margin-top:8px;font-size:12px;opacity:.75">{quiz["description"]}</div>' if quiz.get("description") else ""}
+  </div>
+  {rows}
+  <div class="footer">Document généré le {now} — QuizAgent CI</div>
+</body>
+</html>"""
+    return html.encode("utf-8")
+
+
+def topbar(t,i="📝"): st.markdown(f'<div class="topbar"><span style="font-size:1.2rem">{i}</span><span class="tt">{t}</span></div>',unsafe_allow_html=True)
+def slbl(t): st.markdown(f'<p class="slbl">{t}</p>',unsafe_allow_html=True)
+def badge(t,c="b"): return f'<span class="badge b{c}">{t}</span>'
+
+def kpi_grid(items):
+    """items = [(icon, value, label, color_class), ...]"""
+    cols = "".join(
+        f'<div class="kpi kpi-{c}"><div class="kpi-icon">{i}</div>'
+        f'<p class="kpi-val">{v}</p><p class="kpi-lbl">{l}</p></div>'
+        for i,v,l,c in items
+    )
+    st.markdown(f'<div class="kpi-grid">{cols}</div>', unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════
+#  HOME
+# ══════════════════════════════════════════════════════════════
+
+def render_home():
+    org = f"<br><small style='opacity:.7'>{config.ORG_NAME}</small>" if config.ORG_NAME else ""
+    st.markdown(
+        f'<div class="hero"><div class="hi">📝</div>'
+        f'<h1 class="ht">{config.APP_TITLE}</h1>'
+        f'<p class="hs">{config.APP_SUBTITLE}{org}</p></div>',
+        unsafe_allow_html=True)
+    c1,c2=st.columns(2)
     with c1:
-        if st.button("👤  Je suis Agent", key="h_agent", use_container_width=True, type="primary"):
-            go("agent_search")
+        if st.button("👤  Je suis Agent",key="home_agent",use_container_width=True,type="primary"): go("agent_search")
     with c2:
-        if st.button("⚙️  Administration", key="h_admin", use_container_width=True):
-            go("admin_login")
-    st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("⚙️  Administration",key="home_admin",use_container_width=True): go("admin_login")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  AGENT — Recherche
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+
 def render_agent_search():
-    st.markdown('<div class="app-header"><span class="app-header-icon">👤</span><span class="app-header-title">Identification</span></div>', unsafe_allow_html=True)
-    section("Tapez votre nom ou matricule")
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    q = st.text_input(" ", placeholder="Ex : Konan, Diallo, AGT001…", label_visibility="collapsed", key="sq")
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("← Retour à l'accueil", key="as_back", use_container_width=True):
-        go("home")
-    st.markdown('</div>', unsafe_allow_html=True)
-
+    topbar("Identification","👤")
+    slbl("Tapez votre nom ou matricule")
+    q = st.text_input(" ", placeholder="Ex : Konan, Diallo, AGT001…",
+                       label_visibility="collapsed", key="sq")
+    if st.button("← Retour",key="as_back",use_container_width=True): go("home")
     q = (q or "").strip()
-    if len(q) < 2:
-        if len(q) == 1: st.caption("  Continuez à taper…")
+    if len(q)<2:
+        if len(q)==1: st.caption("Continuez à taper…")
         return
-
     agents = search_agents(q)
     if not agents:
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        st.warning("Aucun agent trouvé. Contactez votre superviseur.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.warning("Aucun agent trouvé. Vérifiez l'orthographe ou contactez votre superviseur.")
         return
-
-    section(f"{len(agents)} résultat(s) — appuyez sur votre nom")
+    slbl(f"{len(agents)} résultat(s) — appuyez sur votre nom")
     for a in agents:
-        label = f"👤  {a['nom']} {a['prenom']}".strip()
-        if a["matricule"]: label += f"  ·  {a['matricule']}"
-        st.markdown('<div class="agent-btn-wrap">', unsafe_allow_html=True)
-        if st.button(label, key=f"sel_{a['id']}", use_container_width=True, type="primary"):
-            SET("current_agent", a); _save(); go("agent_quiz_code")
-        st.markdown('</div>', unsafe_allow_html=True)
+        lbl = f"👤  {a['nom']} {a['prenom']}".strip()
+        if a["matricule"]: lbl += f"  ·  {a['matricule']}"
+        if st.button(lbl,key=f"sel_{a['id']}",use_container_width=True,type="primary"):
+            st.session_state.current_agent=a; _save_state(); go("agent_quiz_code")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  AGENT — Code quiz
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+
 def render_agent_quiz_code():
-    agent = S("current_agent")
+    agent=st.session_state.current_agent
     if not agent: go("agent_search"); return
-
-    st.markdown('<div class="app-header"><span class="app-header-icon">📋</span><span class="app-header-title">Accès au Quiz</span></div>', unsafe_allow_html=True)
-
-    init = (agent["nom"][0] + (agent["prenom"][0] if agent["prenom"] else "")).upper()
-    st.markdown(f"""
-    <div class="agent-info">
-      <div class="agent-avatar">{init}</div>
-      <div>
-        <div class="agent-name">{agent["nom"]} {agent["prenom"]}</div>
-        <div class="agent-mat">{agent["matricule"] or "Agent de terrain"}</div>
-      </div>
-    </div>""", unsafe_allow_html=True)
-
-    section("Code du quiz — communiqué par votre superviseur")
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    code = st.text_input(" ", placeholder="Ex : QZ001", max_chars=20, label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    c1, c2 = st.columns([1, 2])
+    topbar("Accès au Quiz","📋")
+    init=(agent["nom"][0]+(agent["prenom"][0] if agent["prenom"] else "")).upper()
+    st.markdown(
+        f'<div class="card" style="display:flex;align-items:center;gap:12px;margin-bottom:18px">'
+        f'<div class="av" style="width:44px;height:44px;font-size:15px">{init}</div>'
+        f'<div><div style="font-size:1.05rem;font-weight:700">{agent["nom"]} {agent["prenom"]}</div>'
+        f'<div style="color:var(--mu);font-size:.83rem">{agent["matricule"] or "Agent"}</div></div></div>',
+        unsafe_allow_html=True)
+    slbl("Code du quiz communiqué par votre superviseur")
+    code=st.text_input(" ",placeholder="Ex : QZ001",max_chars=20,label_visibility="collapsed")
+    c1,c2=st.columns([1,2])
     with c1:
-        if st.button("← Retour", key="aqc_back", use_container_width=True):
-            go("agent_search")
+        if st.button("← Retour",key="aqc_back",use_container_width=True): go("agent_search")
     with c2:
-        if st.button("▶  Commencer", key="aqc_start", type="primary", use_container_width=True):
-            _start_quiz(agent, code)
-    st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("▶  Commencer",key="aqc_start",type="primary",use_container_width=True):
+            _start_quiz(agent,code)
 
 
 def _start_quiz(agent, code):
     if not (code or "").strip(): st.warning("Saisissez un code."); return
-    quiz = get_quiz_by_code(code.strip())
+    quiz=get_quiz_by_code(code.strip())
     if not quiz: st.error("Code incorrect ou quiz désactivé."); return
-    qs = get_questions(quiz["id"], shuffled=bool(quiz.get("randomize_questions", 0)))
-    if not qs: st.error("Ce quiz ne contient pas encore de questions."); return
-    if session_already_completed(agent["id"], quiz["id"]):
-        st.warning("Vous avez déjà soumis ce quiz."); return
-    epoch = time.time()
-    sid = create_session(agent["id"], quiz["id"], sum(q["points"] for q in qs), epoch)
-    SET("current_quiz", quiz); SET("quiz_questions", qs)
-    SET("quiz_start_time", epoch); SET("quiz_answers", {})
-    SET("quiz_submitted", False); SET("session_id", sid)
-    _save(); go("agent_quiz")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  AGENT — Quiz
-# ══════════════════════════════════════════════════════════════════════════════
-def _calc(questions, answers):
-    score, records = 0.0, []
-    for q in questions:
-        qid = q["id"]; resp = answers.get(qid, ""); ok = 0
-        if q["type"] == "single":
-            ok = 1 if resp in [o["id"] for o in q["options"] if o["is_correct"]] else 0
-        elif q["type"] == "multiple":
-            cor = set(o["id"] for o in q["options"] if o["is_correct"])
-            giv = set(resp) if isinstance(resp, list) else set()
-            ok = 1 if giv == cor and cor else 0
-        elif q["type"] == "numeric":
+    # ── Vérifier session en cours (pour restore après refresh) ──
+    incomplete=get_incomplete_session(agent["id"],quiz["id"])
+    if incomplete and incomplete.get("start_time_epoch"):
+        epoch=incomplete["start_time_epoch"]
+        remaining=quiz["duree_minutes"]*60-(time.time()-epoch)
+        if remaining>15:  # encore du temps
             try:
-                exp = float(q["reponse_correcte_num"]) if q["reponse_correcte_num"] is not None else None
-                giv = float(str(resp).replace(",", ".")) if str(resp).strip() else None
-                ok = 1 if exp is not None and giv is not None and abs(giv - exp) < 0.01 else 0
-            except: ok = 0
-        elif q["type"] == "text":
-            raw = (q.get("reponse_correcte_txt") or "").strip()
-            if raw: ok = 1 if str(resp).lower().strip() in [a.lower().strip() for a in raw.split("|") if a.strip()] else 0
-            else:   ok = 1
-        if ok: score += q["points"]
-        records.append({"question_id": qid,
-                         "reponse": json.dumps(resp, ensure_ascii=False) if isinstance(resp, list) else str(resp),
-                         "is_correct": ok})
-    return score, records
+                raw=incomplete.get("answers_json") or "{}"
+                answers=json.loads(raw)
+                answers={int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+            except Exception:
+                answers={}
+            questions=get_questions(quiz["id"])  # ordre non aléatoire à la restauration
+            st.session_state.current_quiz=quiz
+            st.session_state.quiz_questions=questions
+            st.session_state.quiz_start_time=epoch
+            st.session_state.quiz_answers=answers
+            st.session_state.quiz_submitted=False
+            st.session_state.session_id=incomplete["id"]
+            st.toast("🔄 Quiz en cours restauré — continuez !", icon="✅")
+            go("agent_quiz"); return
+        else:
+            # temps écoulé sur session incomplète → auto-soumettre
+            try:
+                raw=incomplete.get("answers_json") or "{}"
+                answers=json.loads(raw)
+                answers={int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+                questions=get_questions(quiz["id"])
+                score,records=_calc(questions,answers)
+                submit_session(incomplete["id"],score,records)
+            except Exception: pass
+            st.warning("Votre temps était écoulé. Votre session a été automatiquement soumise.")
+            return
+
+    if session_already_completed(agent["id"],quiz["id"]):
+        st.warning("Vous avez déjà soumis ce quiz. Contactez votre superviseur."); return
+
+    shuffled=bool(quiz.get("randomize_questions",0))
+    questions=get_questions(quiz["id"],shuffled=shuffled)
+    if not questions: st.error("Ce quiz ne contient pas encore de questions."); return
+
+    max_score=sum(q["points"] for q in questions)
+    epoch=time.time()
+    sid=create_session(agent["id"],quiz["id"],max_score,epoch)
+    st.session_state.current_quiz=quiz
+    st.session_state.quiz_questions=questions
+    st.session_state.quiz_start_time=epoch
+    st.session_state.quiz_answers={}
+    st.session_state.quiz_submitted=False
+    st.session_state.session_id=sid
+    go("agent_quiz")
+
+
+# ══════════════════════════════════════════════════════════════
+#  AGENT — Quiz (timer fixe)
+# ══════════════════════════════════════════════════════════════
+
+def _calc(questions, answers):
+    score,records=0.0,[]
+    for q in questions:
+        qid=q["id"]; resp=answers.get(qid,""); ok=0
+        if q["type"]=="single":
+            ok=1 if resp in [o["id"] for o in q["options"] if o["is_correct"]] else 0
+        elif q["type"]=="multiple":
+            cor=set(o["id"] for o in q["options"] if o["is_correct"])
+            giv=set(resp) if isinstance(resp,list) else set()
+            ok=1 if giv==cor and cor else 0
+        elif q["type"]=="numeric":
+            try:
+                exp=float(q["reponse_correcte_num"]) if q["reponse_correcte_num"] is not None else None
+                giv=float(str(resp).replace(",",".")) if str(resp).strip() else None
+                ok=1 if exp is not None and giv is not None and abs(giv-exp)<0.01 else 0
+            except: ok=0
+        elif q["type"]=="text":
+            raw=(q.get("reponse_correcte_txt") or "").strip()
+            if raw: ok=1 if str(resp).lower().strip() in [a.lower().strip() for a in raw.split("|") if a.strip()] else 0
+            else:   ok=1
+        if ok: score+=q["points"]
+        records.append({"question_id":qid,
+                         "reponse":json.dumps(resp,ensure_ascii=False) if isinstance(resp,list) else str(resp),
+                         "is_correct":ok})
+    return score,records
 
 
 def _submit():
-    if S("quiz_submitted"): return
-    ql = S("quiz_questions")
-    score, records = _calc(ql, S("quiz_answers"))
-    submit_session(S("session_id"), score, records)
-    SET("final_score", {"score": score, "max_score": sum(q["points"] for q in ql)})
-    SET("quiz_submitted", True)
+    if st.session_state.quiz_submitted: return
+    ql=st.session_state.quiz_questions
+    score,records=_calc(ql,st.session_state.quiz_answers)
+    submit_session(st.session_state.session_id,score,records)
+    st.session_state.final_score={"score":score,"max_score":sum(q["points"] for q in ql)}
+    st.session_state.quiz_submitted=True
 
 
 def render_agent_quiz():
-    if S("quiz_submitted"): go("agent_result"); return
+    if st.session_state.quiz_submitted: go("agent_result"); return
 
-    quiz = S("current_quiz"); questions = S("quiz_questions")
-    if _AR: st_autorefresh(interval=2000, key="qr")
+    quiz=st.session_state.current_quiz
+    questions=st.session_state.quiz_questions
+    agent=st.session_state.current_agent
 
-    remaining = max(0, quiz["duree_minutes"] * 60 - (time.time() - S("quiz_start_time")))
-    if remaining <= 0:
-        _submit(); SET("page", "agent_result"); st.rerun(); return
+    if _AR: st_autorefresh(interval=2000,key="qr")
 
-    mins, secs = int(remaining // 60), int(remaining % 60)
-    if remaining > 300:   cls, lbl, ico = "qt-n", "Temps restant", "⏱"
-    elif remaining > 60:  cls, lbl, ico = "qt-w", "Moins de 5 min !", "⚠️"
-    else:                 cls, lbl, ico = "qt-d", "Dépêchez-vous !", "🚨"
+    remaining=max(0,quiz["duree_minutes"]*60-(time.time()-st.session_state.quiz_start_time))
 
+    if remaining<=0:
+        _submit(); st.session_state.page="agent_result"; st.rerun(); return
+
+    mins,secs=int(remaining//60),int(remaining%60)
+    if remaining>300:  tcls,tlbl,tico="tn","Temps restant","⏱"
+    elif remaining>60: tcls,tlbl,tico="tw","Moins de 5 min !","⚠️"
+    else:              tcls,tlbl,tico="td","Dépêchez-vous !","🚨"
+
+    # ── TIMER FIXE — position:fixed via JS pour garantir le fonctionnement ──
     st.markdown(f"""
-    <div id="qtbar">
-      <div class="qti">
-        <div class="qtbox {cls}">
-          <span class="qt-ico">{ico}</span>
-          <div><p class="qt-time">{mins:02d}:{secs:02d}</p><p class="qt-lbl">{lbl}</p></div>
+    <div id="quiz-timer-bar">
+      <div class="inner">
+        <div class="tbox {tcls}">
+          <span class="ticon">{tico}</span>
+          <div><p class="ttime">{mins:02d}:{secs:02d}</p><p class="tlbl">{tlbl}</p></div>
         </div>
       </div>
     </div>
-    <div style="height:88px"></div>
+    <div style="height:90px"></div>
     <script>
     (function(){{
-      var b=document.getElementById('qtbar');
-      if(b&&b.parentNode!==document.body)document.body.insertBefore(b,document.body.firstChild);
+      var el=document.getElementById('quiz-timer-bar');
+      if(el && el.parentNode!==document.body){{
+        document.body.insertBefore(el,document.body.firstChild);
+      }}
     }})();
-    </script>""", unsafe_allow_html=True)
+    </script>
+    """, unsafe_allow_html=True)
 
-    answered = sum(1 for v in S("quiz_answers").values() if v not in ("", [], None))
-    pct = answered / len(questions) * 100 if questions else 0
-    st.markdown(f"""
-    <div class="prog-wrap">
-      <div class="prog-top"><span><b>{quiz['titre']}</b></span><span>{answered}/{len(questions)} répondue(s)</span></div>
-      <div class="prog-bg"><div class="prog-fill" style="width:{pct:.0f}%"></div></div>
-    </div>""", unsafe_allow_html=True)
+    answered=sum(1 for v in st.session_state.quiz_answers.values() if v not in("","[],",None,[]))
+    pct=answered/len(questions) if questions else 0
+    st.markdown(
+        f'<div class="prog">'
+        f'<div class="prog-row"><span><b>{quiz["titre"]}</b></span><span>{answered}/{len(questions)} répondue(s)</span></div>'
+        f'<div class="prog-bg"><div class="prog-fill" style="width:{pct*100:.0f}%"></div></div>'
+        f'</div>', unsafe_allow_html=True)
 
-    ICONS = {"single": "⭕", "multiple": "☑️", "numeric": "🔢", "text": "📝"}
-    HINTS = {"single": "Une seule réponse", "multiple": "Plusieurs réponses", "numeric": "Entrez un nombre", "text": "Réponse libre"}
+    ICONS={"single":"⭕","multiple":"☑️","numeric":"🔢","text":"📝"}
+    HINTS={"single":"Une seule réponse","multiple":"Plusieurs réponses","numeric":"Entrez un nombre","text":"Réponse libre"}
 
-    for i, q in enumerate(questions):
-        qid = q["id"]
-        pts = f"{q['points']:.0f} pt" + ("s" if q["points"] != 1 else "")
-        st.markdown(f"""
-        <div class="qcard">
-          <div class="qmeta">
-            <span class="qbadge-num">Q{i+1}</span>
-            <span class="qbadge-type">{ICONS[q['type']]} {HINTS[q['type']]}</span>
-            <span class="qbadge-pts">{pts}</span>
-          </div>
-          <p class="qtext">{q['texte']}</p>
-        </div>""", unsafe_allow_html=True)
+    for i,q in enumerate(questions):
+        qid=q["id"]
+        pts=f"{q['points']:.0f} pt"+("s" if q["points"]!=1 else "")
+        st.markdown(
+            f'<div class="qcard">'
+            f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
+            f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
+            f'<span class="qpts">{pts}</span></div>'
+            f'<p class="qtxt">{q["texte"]}</p></div>', unsafe_allow_html=True)
 
-        st.markdown('<div style="padding:4px 16px 0">', unsafe_allow_html=True)
-        if q["type"] == "single":
-            opts = q["options"]; cur = S("quiz_answers").get(qid)
-            idx = next((j for j, o in enumerate(opts) if o["id"] == cur), None)
-            sel = st.radio(" ", range(len(opts)), format_func=lambda x, _o=opts: _o[x]["texte"],
-                           index=idx, key=f"q_{qid}", label_visibility="collapsed")
-            if sel is not None: S("quiz_answers")[qid] = opts[sel]["id"]
-        elif q["type"] == "multiple":
-            cur = S("quiz_answers").get(qid, [])
-            sel = []
+        if q["type"]=="single":
+            opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
+            idx=next((j for j,o in enumerate(opts) if o["id"]==cur),None)
+            sel=st.radio(" ",range(len(opts)),format_func=lambda x,_o=opts:_o[x]["texte"],
+                         index=idx,key=f"q_{qid}",label_visibility="collapsed")
+            if sel is not None: st.session_state.quiz_answers[qid]=opts[sel]["id"]
+
+        elif q["type"]=="multiple":
+            cur=st.session_state.quiz_answers.get(qid,[])
+            sel=[]
             for o in q["options"]:
-                if st.checkbox(o["texte"], value=(o["id"] in cur), key=f"q_{qid}_{o['id']}"): sel.append(o["id"])
-            S("quiz_answers")[qid] = sel
-        elif q["type"] == "numeric":
-            val = S("quiz_answers").get(qid, "")
-            v = st.text_input(" ", value=str(val) if val != "" else "", key=f"q_{qid}",
-                               placeholder="Entrez un nombre…", label_visibility="collapsed")
-            S("quiz_answers")[qid] = v
-        elif q["type"] == "text":
-            val = S("quiz_answers").get(qid, "")
-            v = st.text_area(" ", value=val, key=f"q_{qid}", height=90,
-                              placeholder="Votre réponse…", label_visibility="collapsed")
-            S("quiz_answers")[qid] = v
-        st.markdown('</div>', unsafe_allow_html=True)
-        pad()
+                if st.checkbox(o["texte"],value=(o["id"] in cur),key=f"q_{qid}_{o['id']}"): sel.append(o["id"])
+            st.session_state.quiz_answers[qid]=sel
 
-    # Sauvegarde auto
-    if S("session_id") and not S("quiz_submitted"):
+        elif q["type"]=="numeric":
+            val=st.session_state.quiz_answers.get(qid,"")
+            v=st.text_input(" ",value=str(val) if val!="" else "",key=f"q_{qid}",
+                             placeholder="Entrez un nombre…",label_visibility="collapsed")
+            st.session_state.quiz_answers[qid]=v
+
+        elif q["type"]=="text":
+            val=st.session_state.quiz_answers.get(qid,"")
+            v=st.text_area(" ",value=val,key=f"q_{qid}",height=80,
+                            placeholder="Votre réponse…",label_visibility="collapsed")
+            st.session_state.quiz_answers[qid]=v
+
+        st.markdown("")
+
+    st.markdown("---")
+    if st.button("✅  Soumettre mes réponses",key="quiz_submit",type="primary",use_container_width=True):
+        _submit()
+        go("agent_result")
+        return
+
+    # ── Sauvegarde auto des réponses (uniquement si pas en train de soumettre) ──
+    if st.session_state.session_id and not st.session_state.quiz_submitted:
         try:
-            save_quiz_progress(S("session_id"), json.dumps(S("quiz_answers")), S("quiz_start_time"))
+            save_quiz_progress(
+                st.session_state.session_id,
+                json.dumps(st.session_state.quiz_answers),
+                st.session_state.quiz_start_time
+            )
         except Exception: pass
 
-    st.markdown('<hr style="margin:20px 16px">', unsafe_allow_html=True)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("✅  Soumettre mes réponses", key="q_submit", type="primary", use_container_width=True):
-        _submit(); go("agent_result"); return
-    st.markdown('</div>', unsafe_allow_html=True)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  AGENT — Résultat
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+
 def render_agent_result():
-    res = S("final_score"); quiz = S("current_quiz"); agent = S("current_agent")
+    res=st.session_state.final_score; quiz=st.session_state.current_quiz; agent=st.session_state.current_agent
     if not res or not agent or not quiz: go("home"); return
-
-    show = bool(quiz.get("show_score", 1))
-    score, maxs = res["score"], res["max_score"]
-    pct = (score / maxs * 100) if maxs > 0 else 0
-
-    if show:
-        emoji = "🏆" if pct >= 80 else ("👍" if pct >= 60 else "📚")
-        st.markdown(f"""
-        <div class="score-wrap">
-          <div class="sw-emoji">{emoji}</div>
-          <p class="sw-name">{agent['nom']} {agent['prenom']}</p>
-          <p class="sw-val">{score:.1f} / {maxs:.1f}</p>
-          <p class="sw-pct">{pct:.0f} %</p>
-          <p class="sw-quiz">{quiz['titre']}</p>
-        </div>""", unsafe_allow_html=True)
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        if pct >= 80: st.success("Excellent résultat ! Félicitations ! 🎉")
-        elif pct >= 60: st.info("Bon résultat. Continuez vos efforts !")
+    show_score=bool(quiz.get("show_score",1))
+    score,max_sc=res["score"],res["max_score"]
+    pct=(score/max_sc*100) if max_sc>0 else 0
+    if show_score:
+        emoji="🏆" if pct>=80 else("👍" if pct>=60 else "📚")
+        st.markdown(
+            f'<div class="scard"><div class="se">{emoji}</div>'
+            f'<p class="sn">{agent["nom"]} {agent["prenom"]}</p>'
+            f'<p class="sv">{score:.1f} / {max_sc:.1f}</p>'
+            f'<p class="sp">{pct:.0f} %</p><p class="sq">{quiz["titre"]}</p></div>',
+            unsafe_allow_html=True)
+        if pct>=80: st.success("Excellent résultat ! Félicitations ! 🎉")
+        elif pct>=60: st.info("Bon résultat. Continuez vos efforts !")
         else: st.warning("Il faut encore travailler ce sujet. Courage !")
-        st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.markdown(f"""
-        <div class="submitted-wrap">
-          <div style="font-size:2.8rem;margin-bottom:10px">✅</div>
-          <div style="font-size:1.15rem;font-weight:800;color:var(--blue-x)">Réponses enregistrées</div>
-          <div style="color:var(--text3);font-size:.9rem;margin-top:6px">{agent['nom']} {agent['prenom']} · {quiz['titre']}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown(f'<p style="text-align:center;color:var(--text3);font-size:.82rem;margin:6px 0 16px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>', unsafe_allow_html=True)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("🏠  Retour à l'accueil", key="r_home", use_container_width=True):
-        for k in ("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score","current_agent"):
-            SET(k, _D.get(k))
-        _save(); go("home")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="subcard"><div style="font-size:2.5rem;margin-bottom:8px">✅</div>'
+            f'<div style="font-size:1.1rem;font-weight:700;color:var(--Bd)">Réponses enregistrées</div>'
+            f'<div style="color:var(--mu);font-size:.9rem;margin-top:6px">{agent["nom"]} {agent["prenom"]} · {quiz["titre"]}</div></div>',
+            unsafe_allow_html=True)
+    st.markdown(f'<p style="text-align:center;color:var(--mu);font-size:.82rem;margin:6px 0 14px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>',unsafe_allow_html=True)
+    if st.button("🏠  Retour à l'accueil",key="result_home",use_container_width=True):
+        for k in("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score"): st.session_state[k]=_D[k]
+        st.session_state.current_agent=None; _save_state(); go("home")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  ADMIN — Login
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  ADMIN — Connexion
+# ══════════════════════════════════════════════════════════════
+
 def render_admin_login():
-    if S("admin_logged"): go("admin_dashboard"); return
-    st.markdown('<div class="app-header"><span class="app-header-icon">⚙️</span><span class="app-header-title">Administration</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
-    st.markdown('<h3 style="margin:0 0 16px;font-size:1.1rem;font-weight:800">🔐 Connexion</h3>', unsafe_allow_html=True)
-    pwd = st.text_input("Mot de passe", type="password", placeholder="Mot de passe administrateur", label_visibility="collapsed")
-    pad()
-    c1, c2 = st.columns([1, 2])
+    if st.session_state.admin_logged: go("admin_dashboard"); return
+    topbar("Administration","⚙️")
+    st.markdown('<div class="card">',unsafe_allow_html=True)
+    st.markdown("#### 🔐 Connexion administrateur")
+    pwd=st.text_input(" ",type="password",placeholder="Mot de passe…",label_visibility="collapsed")
+    c1,c2=st.columns([1,2])
     with c1:
-        if st.button("← Retour", key="al_back", use_container_width=True): go("home")
+        if st.button("← Retour",key="al_back",use_container_width=True): go("home")
     with c2:
-        if st.button("Se connecter", key="al_login", type="primary", use_container_width=True):
-            if pwd == config.ADMIN_PASSWORD:
-                SET("admin_logged", True); _save(); go("admin_dashboard")
+        if st.button("Se connecter",key="al_login",type="primary",use_container_width=True):
+            if pwd==config.ADMIN_PASSWORD: st.session_state.admin_logged=True; _save_state(); go("admin_dashboard")
             else: st.error("Mot de passe incorrect.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>',unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  ADMIN — Dashboard
-# ══════════════════════════════════════════════════════════════════════════════
-def render_admin_dashboard():
-    if not S("admin_logged"): go("admin_login"); return
-    st.markdown(f'<div class="app-header"><span class="app-header-icon">⚙️</span><span class="app-header-title">{config.APP_TITLE}</span><span class="app-header-sub">Admin</span></div>', unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════
 
-    t0, t1, t2, t3 = st.tabs(["📊 Vue d'ensemble", "👥 Agents", "📝 Quiz", "📋 Résultats"])
+def render_admin_dashboard():
+    if not st.session_state.admin_logged: go("admin_login"); return
+    topbar(config.APP_TITLE+"  ·  Tableau de bord","⚙️")
+
+    t0,t1,t2,t3=st.tabs(["📊 Vue d'ensemble","👥 Agents","📝 Quiz","📋 Résultats"])
     with t0: _tab_overview()
     with t1: _tab_agents()
     with t2: _tab_quizzes()
     with t3: _tab_results()
 
-    st.markdown('<hr>', unsafe_allow_html=True)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("🚪  Déconnexion", key="a_logout", use_container_width=True):
-        SET("admin_logged", False); _save(); go("home")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    if st.button("🚪  Déconnexion",key="admin_logout",use_container_width=True): st.session_state.admin_logged=False; _save_state(); go("home")
 
 
-# ── Vue d'ensemble ────────────────────────────────────────────────────────────
+# ── Vue d'ensemble ────────────────────────────────────────────
+
 def _tab_overview():
-    stats = get_stats()
-    pad()
-    st.markdown(f"""
-    <div class="kpi-grid">
-      <div class="kpi kpi-b"><span class="kpi-ico">👥</span><p class="kpi-val">{stats['total_agents']}</p><p class="kpi-lbl">Agents total</p></div>
-      <div class="kpi kpi-g"><span class="kpi-ico">✅</span><p class="kpi-val">{stats['pub_agents']}</p><p class="kpi-lbl">Publiés</p></div>
-      <div class="kpi kpi-p"><span class="kpi-ico">📝</span><p class="kpi-val">{stats['active_quizzes']}</p><p class="kpi-lbl">Quiz actifs</p></div>
-      <div class="kpi kpi-o"><span class="kpi-ico">📊</span><p class="kpi-val">{stats['total_submissions']}</p><p class="kpi-lbl">Soumissions</p></div>
-    </div>""", unsafe_allow_html=True)
+    stats=get_stats()
 
-    avg = stats["avg_score"]
-    rate = min(100, round(stats["total_submissions"] / max(1, stats["pub_agents"]) * 100))
-    col_avg = "var(--green)" if avg >= 70 else ("var(--orange)" if avg >= 50 else "var(--red)")
-    st.markdown(f"""
-    <div class="stat-row">
-      <div class="stat-box">
-        <p class="stat-val" style="color:{col_avg}">{avg:.1f}%</p>
-        <p class="stat-lbl">Score moyen</p>
-      </div>
-      <div class="stat-box">
-        <p class="stat-val" style="color:var(--blue)">{rate}%</p>
-        <p class="stat-lbl">Taux complétion</p>
-      </div>
-    </div>""", unsafe_allow_html=True)
+    kpi_grid([
+        ("👥", stats["total_agents"],   "Agents total",  "b"),
+        ("✅", stats["pub_agents"],      "Publiés",       "g"),
+        ("📝", stats["active_quizzes"],  "Quiz actifs",   "p"),
+        ("📊", stats["total_submissions"],"Soumissions",  "o"),
+    ])
 
-    if stats["per_quiz"]:
-        section("Scores moyens par quiz")
-        bars = ""
-        for q in stats["per_quiz"]:
-            p = min(100, q["avg_pct"] or 0)
-            c = "var(--green)" if p >= 70 else ("var(--orange)" if p >= 50 else "var(--red)")
-            bars += f'<div class="sb-row"><span class="sb-lbl" title="{q["titre"]}">{q["titre"][:22]}</span><div class="sb-bg"><div class="sb-fill" style="width:{p:.0f}%;background:{c}"></div></div><span class="sb-val" style="color:{c}">{p:.0f}%</span></div>'
-        st.markdown(f'<div class="score-bars">{bars}</div>', unsafe_allow_html=True)
-
-    if stats["recent"]:
-        section("10 dernières soumissions")
-        items = ""
-        for r in stats["recent"]:
-            p = (r["score"] / r["max_score"] * 100) if r["max_score"] > 0 else 0
-            c = "var(--green)" if p >= 70 else ("var(--orange)" if p >= 50 else "var(--red)")
-            init = (r["nom"][0] + (r["prenom"][0] if r["prenom"] else "")).upper()
-            try:
-                dt = datetime.fromisoformat(r["completed_at"])
-                diff = datetime.now() - dt
-                tstr = f"Il y a {diff.seconds//60} min" if diff.seconds < 3600 else (f"Il y a {diff.seconds//3600}h" if diff.days == 0 else dt.strftime("%d/%m %H:%M"))
-            except: tstr = (r["completed_at"] or "")[:16]
-            items += f'<div class="act-item"><div class="act-av">{init}</div><div><div class="act-name">{r["nom"]} {r["prenom"]}</div><div class="act-quiz">{r["titre"]}</div></div><div class="act-right"><div class="act-pct" style="color:{c}">{p:.0f}%</div><div class="act-time">{tstr}</div></div></div>'
-        st.markdown(f'<div class="activity" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:4px 16px;margin:0 16px;box-shadow:var(--shadow)">{items}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        st.info("Aucune soumission pour l'instant.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    section("Actions rapides")
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
+    # Score moyen global
+    avg=stats["avg_score"]
+    c1,c2=st.columns(2)
     with c1:
-        if st.button("➕  Nouveau quiz", key="ov_new_qz", use_container_width=True, type="primary"):
-            SET("edit_quiz_id", None); _save(); go("admin_quiz_edit")
+        st.markdown(
+            f'<div class="card" style="text-align:center">'
+            f'<div style="font-size:.72rem;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Score moyen global</div>'
+            f'<div style="font-size:2.4rem;font-weight:900;color:{"var(--G)" if avg>=70 else "var(--O)" if avg>=50 else "var(--R)"}">{avg:.1f}%</div>'
+            f'</div>',unsafe_allow_html=True)
     with c2:
-        if st.button("✅  Publier tous les agents", key="ov_pub_all", use_container_width=True):
+        # Taux de complétion : sessions complétées / agents publiés
+        rate=min(100,round(stats["total_submissions"]/max(1,stats["pub_agents"])*100))
+        st.markdown(
+            f'<div class="card" style="text-align:center">'
+            f'<div style="font-size:.72rem;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Agents ayant composé</div>'
+            f'<div style="font-size:2.4rem;font-weight:900;color:var(--B)">{rate}%</div>'
+            f'</div>',unsafe_allow_html=True)
+
+    # Scores par quiz
+    if stats["per_quiz"]:
+        st.markdown('<p class="slbl">Scores moyens par quiz</p>',unsafe_allow_html=True)
+        bars=""
+        for q in stats["per_quiz"]:
+            pct=min(100,q["avg_pct"] or 0)
+            col="var(--G)" if pct>=70 else("var(--O)" if pct>=50 else "var(--R)")
+            bars+=f'<div class="qz-bar-row"><span class="qz-bar-lbl" title="{q["titre"]}">{q["titre"][:20]}</span><div class="qz-bar-bg"><div class="qz-bar-fill" style="width:{pct:.0f}%;background:linear-gradient(90deg,{col},{col}88)"></div></div><span class="qz-bar-val">{pct:.0f}%</span></div>'
+        st.markdown(f'<div class="qz-bar-wrap">{bars}</div>',unsafe_allow_html=True)
+
+    # Activité récente
+    if stats["recent"]:
+        st.markdown('<p class="slbl">10 dernières soumissions</p>',unsafe_allow_html=True)
+        items=""
+        for r in stats["recent"]:
+            pct_r=(r["score"]/r["max_score"]*100) if r["max_score"]>0 else 0
+            col_r="var(--G)" if pct_r>=70 else("var(--O)" if pct_r>=50 else "var(--R)")
+            init_r=(r["nom"][0]+(r["prenom"][0] if r["prenom"] else "")).upper()
+            # Format time
+            try:
+                dt=datetime.fromisoformat(r["completed_at"])
+                diff=datetime.now()-dt
+                if diff.seconds<3600:    tstr=f"Il y a {diff.seconds//60} min"
+                elif diff.days==0:       tstr=f"Il y a {diff.seconds//3600}h"
+                else:                    tstr=dt.strftime("%d/%m %H:%M")
+            except: tstr=r["completed_at"][:16] if r["completed_at"] else "—"
+            items+=(f'<div class="activity-item">'
+                    f'<div class="act-av">{init_r}</div>'
+                    f'<div><div class="act-name">{r["nom"]} {r["prenom"]}</div>'
+                    f'<div class="act-quiz">{r["titre"]}</div></div>'
+                    f'<div class="act-score">'
+                    f'<div class="act-pct" style="color:{col_r}">{pct_r:.0f}%</div>'
+                    f'<div class="act-time">{tstr}</div></div></div>')
+        st.markdown(f'<div class="card">{items}</div>',unsafe_allow_html=True)
+    else:
+        st.info("Aucune soumission pour l'instant.")
+
+    # Actions rapides
+    st.markdown('<p class="slbl">Actions rapides</p>',unsafe_allow_html=True)
+    c1,c2=st.columns(2)
+    with c1:
+        if st.button("➕  Créer un quiz",key="ovw_create_quiz",use_container_width=True,type="primary"):
+            st.session_state.edit_quiz_id=None; go("admin_quiz_edit")
+    with c2:
+        if st.button("✅  Publier tous les agents",key="ovw_pub_all",use_container_width=True):
             publish_all_agents(); st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
-# ── Agents ────────────────────────────────────────────────────────────────────
+# ── Agents ────────────────────────────────────────────────────
+
 def _ndf(df):
-    df.columns = [str(c).lower().strip() for c in df.columns]
-    nom = next((c for c in ["nom","name","lastname","noms"] if c in df.columns), None)
+    df.columns=[str(c).lower().strip() for c in df.columns]
+    nom=next((c for c in ["nom","name","lastname","noms"] if c in df.columns),None)
     if not nom: return None
-    pre = next((c for c in ["prenom","prénom","firstname"] if c in df.columns), None)
-    mat = next((c for c in ["matricule","id","code"] if c in df.columns), None)
-    out = pd.DataFrame()
-    out["nom"] = df[nom]; out["prenom"] = df[pre] if pre else ""
-    out["matricule"] = df[mat] if mat else ""
+    pre=next((c for c in ["prenom","prénom","firstname","prenoms"] if c in df.columns),None)
+    mat=next((c for c in ["matricule","id","code","identifiant"] if c in df.columns),None)
+    out=pd.DataFrame()
+    out["nom"]=df[nom]; out["prenom"]=df[pre] if pre else ""; out["matricule"]=df[mat] if mat else ""
     return out
 
-def _tab_agents():
-    s1, s2, s3 = st.tabs(["✏️ Ajouter", "📥 Importer", "📋 Liste"])
-    with s1:
-        pad()
-        with st.form("fag", clear_on_submit=True):
-            c1,c2,c3 = st.columns(3)
-            with c1: nom = st.text_input("Nom *")
-            with c2: pre = st.text_input("Prénom")
-            with c3: mat = st.text_input("Matricule")
-            if st.form_submit_button("Ajouter l'agent", type="primary", use_container_width=True):
-                if not nom.strip(): st.error("Nom obligatoire.")
-                elif add_agent_manual(nom.strip(), pre.strip(), mat.strip()): st.success(f"{nom} ajouté."); st.rerun()
-                else: st.warning("Cet agent existe déjà.")
 
+def _tab_agents():
+    s1,s2,s3=st.tabs(["✏️ Ajouter","📥 Importer","📋 Liste"])
+    with s1:
+        with st.form("fag",clear_on_submit=True):
+            c1,c2,c3=st.columns(3)
+            with c1: nom=st.text_input("Nom *")
+            with c2: pre=st.text_input("Prénom")
+            with c3: mat=st.text_input("Matricule")
+            if st.form_submit_button("Ajouter",type="primary",use_container_width=True):
+                if not nom.strip(): st.error("Nom obligatoire.")
+                elif add_agent_manual(nom.strip(),pre.strip(),mat.strip()): st.success(f"{nom} ajouté."); st.rerun()
+                else: st.warning("Cet agent existe déjà.")
     with s2:
-        pad()
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        st.markdown("**📂 Fichier CSV ou Excel**")
-        st.caption("Colonnes : `nom`, `prenom`, `matricule`")
-        up = st.file_uploader("Fichier", type=["csv","xlsx","xls"], label_visibility="collapsed")
+        st.markdown("**Fichier CSV ou Excel**"); st.caption("Colonnes : `nom`, `prenom`, `matricule`")
+        up=st.file_uploader("Fichier",type=["csv","xlsx","xls"],label_visibility="collapsed")
         if up:
             try:
-                df_r = pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
-                df = _ndf(df_r)
+                df_r=pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
+                df=_ndf(df_r)
                 if df is None: st.error("Colonne 'nom' introuvable.")
                 else:
-                    st.dataframe(df.head(5), use_container_width=True)
-                    st.caption(f"{len(df)} agent(s) dans le fichier")
-                    if st.button("✅  Importer", key="ag_imp_file", type="primary", use_container_width=True):
-                        n = upsert_agents(df); st.success(f"{n} importé(s)."); st.rerun()
+                    st.dataframe(df.head(5),use_container_width=True)
+                    st.caption(f"{len(df)} agent(s)")
+                    if st.button("✅  Importer",key="ag_import_file",type="primary",use_container_width=True):
+                        n=upsert_agents(df); st.success(f"{n} importé(s)."); st.rerun()
             except Exception as e: st.error(f"Erreur : {e}")
-        st.markdown("---")
-        st.markdown("**🌐 Google Sheets (lien public)**")
-        gs = st.text_input("URL", placeholder="https://docs.google.com/spreadsheets/d/…", label_visibility="collapsed")
-        if st.button("Importer depuis Google Sheets", key="ag_imp_gs", use_container_width=True): _gs(gs)
-        st.markdown('</div>', unsafe_allow_html=True)
-
+        st.markdown("---"); st.markdown("**Google Sheets (lien public)**")
+        gs=st.text_input("URL",placeholder="https://docs.google.com/spreadsheets/d/…",label_visibility="collapsed")
+        if st.button("Importer depuis Google Sheets",key="ag_import_gs",use_container_width=True): _gs(gs)
     with s3:
-        ags = get_all_agents()
-        if not ags: st.info("Aucun agent dans la base."); return
-        nb = sum(1 for a in ags if a["published"])
-        st.markdown(f'<p style="padding:12px 16px 4px;color:var(--text3);font-size:.85rem"><b style="color:var(--text)">{len(ags)}</b> agent(s) &nbsp;·&nbsp;{bdg(f"{nb} publié(s)","g")} &nbsp;{bdg(f"{len(ags)-nb} brouillon(s)","o")}</p>', unsafe_allow_html=True)
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        c1, c2 = st.columns(2)
+        ags=get_all_agents()
+        if not ags: st.info("Aucun agent."); return
+        nb=sum(1 for a in ags if a["published"])
+        st.markdown(f'<p style="color:var(--mu);font-size:.85rem;margin-bottom:10px"><b>{len(ags)}</b> agent(s) &nbsp;·&nbsp;{badge(f"{nb} publié(s)","g")} &nbsp;{badge(f"{len(ags)-nb} brouillon(s)","o")}</p>',unsafe_allow_html=True)
+        c1,c2=st.columns(2)
         with c1:
-            if st.button("✅ Publier tous", key="ag_pub_all", use_container_width=True, type="primary"):
-                publish_all_agents(); st.rerun()
+            if st.button("✅ Publier tous",key="ag_pub_all",use_container_width=True,type="primary"): publish_all_agents(); st.rerun()
         with c2:
-            if st.button("⛔ Dépublier tous", key="ag_unpub_all", use_container_width=True):
-                unpublish_all_agents(); st.rerun()
-        filtre = st.text_input("🔍 Filtrer", placeholder="Nom, matricule…", key="af", label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
-        shown = [a for a in ags if not filtre or filtre.lower() in f"{a['nom']} {a['prenom']} {a['matricule']}".lower()]
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
+            if st.button("⛔ Dépublier tous",key="ag_unpub_all",use_container_width=True): unpublish_all_agents(); st.rerun()
+        st.markdown("---")
+        filtre=st.text_input("🔍 Filtrer",placeholder="Nom, matricule…",key="af",label_visibility="collapsed")
+        shown=[a for a in ags if not filtre or filtre.lower() in f"{a['nom']} {a['prenom']} {a['matricule']}".lower()]
         for a in shown:
-            init = (a["nom"][0] + (a["prenom"][0] if a["prenom"] else "")).upper()
-            pub_b = bdg("✓ Publié","g") if a["published"] else bdg("Brouillon","o")
-            mat_s = f' · <span style="color:var(--text3)">{a["matricule"]}</span>' if a["matricule"] else ""
-            st.markdown(f'<div class="ag-card"><div class="ag-top"><div class="ag-av">{init}</div><div><b>{a["nom"]} {a["prenom"]}</b>{mat_s}<br>{pub_b}</div></div>', unsafe_allow_html=True)
-            c1, c2 = st.columns([3,1])
+            init=(a["nom"][0]+(a["prenom"][0] if a["prenom"] else "")).upper()
+            pub_b=badge("✓ Publié","g") if a["published"] else badge("Brouillon","o")
+            mat_s=f'  ·  <span style="color:var(--mu)">{a["matricule"]}</span>' if a["matricule"] else ""
+            st.markdown(f'<div class="agcard"><div class="agtop"><div class="av">{init}</div><div><b>{a["nom"]} {a["prenom"]}</b>{mat_s}<br>{pub_b}</div></div>',unsafe_allow_html=True)
+            c1,c2=st.columns([3,1])
             with c1:
-                if st.button("🔓 Dépublier" if a["published"] else "✅ Publier", key=f"p_{a['id']}", use_container_width=True):
-                    set_agent_published(a["id"], 0 if a["published"] else 1); st.rerun()
+                lbl="🔓 Dépublier" if a["published"] else "✅ Publier"
+                if st.button(lbl,key=f"p_{a['id']}",use_container_width=True): set_agent_published(a["id"],0 if a["published"] else 1); st.rerun()
             with c2:
-                if st.button("🗑️", key=f"d_{a['id']}", use_container_width=True):
-                    delete_agent(a["id"]); st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+                if st.button("🗑️",key=f"d_{a['id']}",use_container_width=True): delete_agent(a["id"]); st.rerun()
+            st.markdown('</div>',unsafe_allow_html=True)
+
 
 def _gs(url):
     if not (url or "").strip(): st.warning("Collez une URL."); return
     try:
-        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+        m=re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)",url)
         if not m: st.error("URL invalide."); return
-        sid = m.group(1); gm = re.search(r"gid=(\d+)", url)
-        gid = gm.group(1) if gm else "0"
-        r = requests.get(f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}", timeout=15)
-        r.raise_for_status()
-        df = _ndf(pd.read_csv(io.StringIO(r.text)))
+        sid=m.group(1); gm=re.search(r"gid=(\d+)",url); gid=gm.group(1) if gm else "0"
+        r=requests.get(f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}",timeout=15); r.raise_for_status()
+        df=_ndf(pd.read_csv(io.StringIO(r.text)))
         if df is None: st.error("Colonne 'nom' introuvable."); return
-        n = upsert_agents(df); st.success(f"{n} importé(s)."); st.rerun()
+        n=upsert_agents(df); st.success(f"{n} agent(s) importé(s)."); st.rerun()
     except Exception as e: st.error(f"Erreur : {e}")
 
 
-# ── Quiz ──────────────────────────────────────────────────────────────────────
+# ── Quiz ──────────────────────────────────────────────────────
+
 def _tab_quizzes():
-    pad()
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("➕  Créer un nouveau quiz", key="qz_create", type="primary", use_container_width=True):
-        SET("edit_quiz_id", None); go("admin_quiz_edit")
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('<hr>', unsafe_allow_html=True)
-    quizzes = get_all_quizzes()
-    if not quizzes:
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        st.info("Aucun quiz. Cliquez sur 'Créer' pour commencer.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
+    if st.button("➕  Créer un quiz",key="qz_create_quiz",type="primary",use_container_width=True):
+        st.session_state.edit_quiz_id=None; go("admin_quiz_edit")
+    st.markdown("---")
+    quizzes=get_all_quizzes()
+    if not quizzes: st.info("Aucun quiz."); return
     for quiz in quizzes:
-        nb = len(get_questions(quiz["id"]))
-        s  = bdg("Actif","g") if quiz["actif"] else bdg("Inactif","gr")
-        sc = bdg("Score visible","b") if quiz.get("show_score",1) else bdg("Score masqué","o")
-        rn = bdg("Aléatoire","b") if quiz.get("randomize_questions",0) else ""
+        nb=len(get_questions(quiz["id"]))
+        s=badge("Actif","g") if quiz["actif"] else badge("Inactif","gr")
+        sc=badge("Score visible","b") if quiz.get("show_score",1) else badge("Score masqué","o")
+        rn=badge("Aléatoire","b") if quiz.get("randomize_questions",0) else ""
         with st.expander(f"{'🟢' if quiz['actif'] else '⚫'} {quiz['titre']}  ·  `{quiz['code']}`"):
-            st.markdown(f"{s} &nbsp;{sc} &nbsp;{rn} &nbsp;{bdg(str(quiz['duree_minutes'])+' min','gr')} &nbsp;{bdg(str(nb)+' Q','gr')}", unsafe_allow_html=True)
+            st.markdown(f"{s} &nbsp;{sc} &nbsp;{rn} &nbsp;{badge(str(quiz['duree_minutes'])+' min','gr')} &nbsp;{badge(str(nb)+' question(s)','gr')}",unsafe_allow_html=True)
             if quiz["description"]: st.caption(quiz["description"])
-            pad()
-            c1, c2, c3 = st.columns(3)
+            c1,c2,c3=st.columns(3)
             with c1:
-                if st.button("✏️ Modifier", key=f"eq_{quiz['id']}", use_container_width=True):
-                    SET("edit_quiz_id", quiz["id"]); go("admin_quiz_edit")
+                if st.button("✏️ Modifier",key=f"eq_{quiz['id']}",use_container_width=True): st.session_state.edit_quiz_id=quiz["id"]; go("admin_quiz_edit")
             with c2:
-                if st.button("🟢 Activer" if not quiz["actif"] else "🔴 Désactiver", key=f"tq_{quiz['id']}", use_container_width=True):
+                if st.button("🟢 Activer" if not quiz["actif"] else "🔴 Désactiver",key=f"tq_{quiz['id']}",use_container_width=True):
                     update_quiz(quiz["id"],quiz["titre"],quiz["code"],quiz["duree_minutes"],quiz["description"],0 if quiz["actif"] else 1,quiz.get("show_score",1),quiz.get("randomize_questions",0)); st.rerun()
             with c3:
-                if st.button("🗑 Suppr.", key=f"dq_{quiz['id']}", use_container_width=True):
-                    delete_quiz(quiz["id"]); st.rerun()
+                if st.button("🗑 Suppr.",key=f"dq_{quiz['id']}",use_container_width=True): delete_quiz(quiz["id"]); st.rerun()
+            # Export PDF corrigé
             if nb > 0:
-                qs = get_questions(quiz["id"])
-                pdf_data = _make_pdf(quiz, qs)
-                st.download_button("📄  Corrigé PDF", data=pdf_data,
-                                    file_name=f"corrige_{quiz['code']}.pdf",
-                                    mime="application/pdf",
-                                    key=f"pdf_{quiz['id']}", use_container_width=True)
+                qz_questions = get_questions(quiz["id"])
+                pdf_bytes = _generate_quiz_pdf(quiz, qz_questions)
+                st.download_button(
+                    "📄  Télécharger le corrigé PDF",
+                    data=pdf_bytes,
+                    file_name=f"corrige_{quiz['code']}.html",
+                    mime="text/html",
+                    key=f"pdf_{quiz['id']}",
+                    use_container_width=True,
+                )
 
 
-# ── Résultats ─────────────────────────────────────────────────────────────────
+# ── Résultats ─────────────────────────────────────────────────
+
 def _tab_results():
-    quizzes = get_all_quizzes()
-    opts = {0: "— Tous les quiz —"}
-    opts.update({q["id"]: f"{q['titre']} ({q['code']})" for q in quizzes})
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    sel = st.selectbox("Quiz", list(opts.keys()), format_func=lambda x: opts[x], label_visibility="collapsed")
-    results = get_results(sel if sel else None)
-    st.markdown('</div>', unsafe_allow_html=True)
-    if not results:
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        st.info("Aucun résultat disponible.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
-    df = pd.DataFrame(results)
-    df["pct"] = (df["score"] / df["max_score"] * 100).round(1)
-    df["agent"] = df["nom"] + " " + df["prenom"]
-    disp = df[["agent","matricule","quiz_titre","score","max_score","pct","completed_at"]].copy()
-    disp.columns = ["Agent","Matricule","Quiz","Score","Sur","%","Date"]
-    st.dataframe(disp, use_container_width=True)
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        disp.to_excel(w, index=False, sheet_name="Résultats")
-        ws = w.sheets["Résultats"]
+    quizzes=get_all_quizzes()
+    opts={0:"— Tous les quiz —"}; opts.update({q["id"]:f"{q['titre']} ({q['code']})" for q in quizzes})
+    sel=st.selectbox("Quiz",list(opts.keys()),format_func=lambda x:opts[x],label_visibility="collapsed")
+    results=get_results(sel if sel else None)
+    if not results: st.info("Aucun résultat disponible."); return
+    df=pd.DataFrame(results)
+    df["pct"]=(df["score"]/df["max_score"]*100).round(1); df["agent"]=df["nom"]+" "+df["prenom"]
+    disp=df[["agent","matricule","quiz_titre","score","max_score","pct","completed_at"]].copy()
+    disp.columns=["Agent","Matricule","Quiz","Score","Sur","%","Date"]
+    st.dataframe(disp,use_container_width=True)
+    buf=io.BytesIO()
+    with pd.ExcelWriter(buf,engine="openpyxl") as w:
+        disp.to_excel(w,index=False,sheet_name="Résultats")
+        ws=w.sheets["Résultats"]
         for col in ws.columns:
-            ml = max((len(str(c.value)) for c in col if c.value), default=10)
-            ws.column_dimensions[col[0].column_letter].width = min(ml + 4, 40)
+            ml=max((len(str(c.value)) for c in col if c.value),default=10)
+            ws.column_dimensions[col[0].column_letter].width=min(ml+4,40)
     buf.seek(0)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    st.download_button("📥  Télécharger Excel", data=buf.getvalue(),
+    st.download_button("📥  Télécharger Excel",data=buf.getvalue(),
                         file_name=f"resultats_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  ADMIN — Éditeur Quiz
-# ══════════════════════════════════════════════════════════════════════════════
-_TYPES = {"single":"⭕  Choix unique","multiple":"☑️  Choix multiple",
-          "numeric":"🔢  Valeur numérique","text":"📝  Texte libre"}
+# ══════════════════════════════════════════════════════════════
+
+_TYPES={"single":"⭕  Choix unique","multiple":"☑️  Choix multiple","numeric":"🔢  Valeur numérique","text":"📝  Texte libre"}
+
 
 def render_admin_quiz_edit():
-    if not S("admin_logged"): go("admin_login"); return
-    qid = S("edit_quiz_id"); is_new = qid is None
-    existing = get_quiz(qid) if not is_new else None
-    st.markdown(f'<div class="app-header"><span class="app-header-icon">📝</span><span class="app-header-title">{"Nouveau Quiz" if is_new else "Modifier le Quiz"}</span></div>', unsafe_allow_html=True)
-
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
+    if not st.session_state.admin_logged: go("admin_login"); return
+    quiz_id=st.session_state.edit_quiz_id; is_new=quiz_id is None; existing=get_quiz(quiz_id) if not is_new else None
+    topbar("Nouveau Quiz" if is_new else "Modifier le Quiz","📝")
+    st.markdown('<div class="card">',unsafe_allow_html=True)
     with st.form("fqi"):
-        titre = st.text_input("Titre *", value=existing["titre"] if existing else "", placeholder="Ex : Évaluation module Femme")
-        c1, c2 = st.columns(2)
-        with c1: code = st.text_input("Code *", value=existing["code"] if existing else "", placeholder="QZ001", max_chars=20)
-        with c2: duree = st.number_input("Durée (min)", min_value=1, max_value=600, value=existing["duree_minutes"] if existing else 30)
-        desc = st.text_area("Description", value=existing["description"] if existing else "", height=68)
-        c1, c2 = st.columns(2)
-        with c1: show_sc = st.checkbox("Afficher le score", value=bool(existing.get("show_score",1)) if existing else True)
-        with c2: rnd = st.checkbox("Questions aléatoires", value=bool(existing.get("randomize_questions",0)) if existing else False)
-        if st.form_submit_button("💾  Enregistrer", type="primary", use_container_width=True):
+        titre=st.text_input("Titre *",value=existing["titre"] if existing else "",placeholder="Ex : Évaluation module Femme")
+        c1,c2=st.columns(2)
+        with c1: code=st.text_input("Code *",value=existing["code"] if existing else "",placeholder="QZ001",max_chars=20)
+        with c2: duree=st.number_input("Durée (min)",min_value=1,max_value=600,value=existing["duree_minutes"] if existing else 30)
+        desc=st.text_area("Description",value=existing["description"] if existing else "",height=68)
+        c1,c2=st.columns(2)
+        with c1: show_sc=st.checkbox("Afficher le score aux agents",value=bool(existing.get("show_score",1)) if existing else True,help="Décoché = l'agent voit seulement 'Réponses enregistrées'")
+        with c2: rnd=st.checkbox("Questions aléatoires",value=bool(existing.get("randomize_questions",0)) if existing else False,help="Ordre différent pour chaque agent")
+        if st.form_submit_button("💾  Enregistrer",type="primary",use_container_width=True):
             if not titre.strip() or not code.strip(): st.error("Titre et code obligatoires.")
             else:
                 if is_new:
                     try:
-                        nid = create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd))
-                        SET("edit_quiz_id", nid); st.success("Quiz créé !"); st.rerun()
+                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd))
+                        st.session_state.edit_quiz_id=nid; st.success("Quiz créé !"); st.rerun()
                     except Exception as e: st.error(f"Erreur (code déjà existant ?) : {e}")
                 else:
-                    update_quiz(qid,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd))
-                    st.success("Quiz mis à jour."); st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd)); st.success("Quiz mis à jour."); st.rerun()
+    st.markdown('</div>',unsafe_allow_html=True)
 
-    cur_id = S("edit_quiz_id")
+    cur_id=st.session_state.edit_quiz_id
     if not cur_id:
-        st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-        if st.button("← Retour", key="qe_back_top", use_container_width=True): go("admin_dashboard")
-        st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("← Retour",key="qe_back_top",use_container_width=True): go("admin_dashboard")
         return
 
-    questions = get_questions(cur_id)
-    section(f"Questions ({len(questions)})")
-
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
+    questions=get_questions(cur_id)
+    slbl(f"Questions ({len(questions)})")
     if questions:
-        for i, q in enumerate(questions):
-            with st.expander(f"Q{i+1}  ·  {_TYPES[q['type']]}  ·  {q['texte'][:48]}{'…' if len(q['texte'])>48 else ''}"):
-                if q["type"] in ("single","multiple"):
+        for i,q in enumerate(questions):
+            with st.expander(f"Q{i+1}  ·  {_TYPES[q['type']]}  ·  {q['texte'][:50]}{'…' if len(q['texte'])>50 else ''}"):
+                if q["type"] in("single","multiple"):
                     for o in q["options"]: st.markdown(f"{'✅' if o['is_correct'] else '◻️'} {o['texte']}")
-                elif q["type"] == "numeric": st.markdown(f"**Réponse :** `{q['reponse_correcte_num']}`")
-                elif q["type"] == "text": st.markdown(f"**Réponses :** `{q['reponse_correcte_txt']}`")
+                elif q["type"]=="numeric": st.markdown(f"**Réponse :** `{q['reponse_correcte_num']}`")
+                elif q["type"]=="text":    st.markdown(f"**Réponses :** `{q['reponse_correcte_txt']}`")
                 st.caption(f"{q['points']} point(s)")
-                if st.button("🗑️ Supprimer", key=f"dq_{q['id']}"):
-                    delete_question(q["id"]); reorder_questions(cur_id); st.rerun()
-    else:
-        st.info("Aucune question. Ajoutez-en ci-dessous.")
-    st.markdown('</div>', unsafe_allow_html=True)
+                if st.button("🗑️ Supprimer",key=f"dq_{q['id']}"): delete_question(q["id"]); reorder_questions(cur_id); st.rerun()
+    else: st.info("Aucune question. Ajoutez-en ci-dessous.")
 
-    section("Ajouter une question")
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    q_type = st.selectbox("Type", list(_TYPES.keys()), format_func=lambda x: _TYPES[x], key="aqt", label_visibility="collapsed")
-    with st.form("faq", clear_on_submit=True):
-        q_txt = st.text_area("Question *", height=88, placeholder="Saisissez votre question…")
-        q_pts = st.number_input("Points", min_value=0.5, max_value=20.0, value=1.0, step=0.5)
-        opts_d = []
-        if q_type in ("single","multiple"):
-            st.markdown("**Options** — cochez ✅ la/les bonne(s) réponse(s)")
+    slbl("Ajouter une question")
+    q_type=st.selectbox("Type",list(_TYPES.keys()),format_func=lambda x:_TYPES[x],key="aqt",label_visibility="collapsed")
+    with st.form("faq",clear_on_submit=True):
+        q_txt=st.text_area("Question *",height=88,placeholder="Saisissez votre question…")
+        q_pts=st.number_input("Points",min_value=0.5,max_value=20.0,value=1.0,step=0.5)
+        opts_d=[]
+        if q_type in("single","multiple"):
+            st.markdown("**Options** — cochez la/les bonne(s) réponse(s) ✅")
             for j in range(6):
-                c1, c2 = st.columns([5,1])
-                with c1: ot = st.text_input(f"Option {j+1}", key=f"ot_{j}", label_visibility="collapsed", placeholder=f"Option {j+1}…")
-                with c2: oc = st.checkbox("✅", key=f"oc_{j}")
-                if ot.strip(): opts_d.append({"texte": ot.strip(), "is_correct": oc})
-        elif q_type == "numeric": c_num = st.number_input("Réponse correcte", value=0.0, format="%.4f")
-        elif q_type == "text":    c_txt = st.text_input("Réponse(s)", placeholder="rep1 | rep2  (laisser vide = question ouverte)")
-        if st.form_submit_button("➕  Ajouter la question", type="primary", use_container_width=True):
-            err = None
-            if not q_txt.strip(): err = "Texte obligatoire."
-            elif q_type in ("single","multiple"):
-                if not opts_d: err = "Ajoutez au moins une option."
-                elif not any(o["is_correct"] for o in opts_d): err = "Cochez au moins une bonne réponse."
-                elif q_type == "single" and sum(o["is_correct"] for o in opts_d) > 1: err = "Une seule bonne réponse."
+                c1,c2=st.columns([5,1])
+                with c1: ot=st.text_input(f"Option {j+1}",key=f"ot_{j}",label_visibility="collapsed",placeholder=f"Option {j+1}…")
+                with c2: oc=st.checkbox("✅",key=f"oc_{j}")
+                if ot.strip(): opts_d.append({"texte":ot.strip(),"is_correct":oc})
+        elif q_type=="numeric": c_num=st.number_input("Réponse correcte",value=0.0,format="%.4f")
+        elif q_type=="text":    c_txt=st.text_input("Réponse(s)",placeholder="rep1 | rep2  (laisser vide = question ouverte)")
+        if st.form_submit_button("➕  Ajouter la question",type="primary",use_container_width=True):
+            err=None
+            if not q_txt.strip(): err="Texte obligatoire."
+            elif q_type in("single","multiple"):
+                if not opts_d: err="Ajoutez au moins une option."
+                elif not any(o["is_correct"] for o in opts_d): err="Cochez au moins une bonne réponse."
+                elif q_type=="single" and sum(o["is_correct"] for o in opts_d)>1: err="Choix unique : une seule bonne réponse."
             if err: st.error(err)
             else:
-                ordre = len(questions)
-                if q_type in ("single","multiple"): add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,options=opts_d)
-                elif q_type == "numeric":           add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,num=c_num)
-                elif q_type == "text":              add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,txt=(c_txt.strip() if c_txt else ""))
+                ordre=len(questions)
+                if q_type in("single","multiple"): add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,options=opts_d)
+                elif q_type=="numeric":             add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,num=c_num)
+                elif q_type=="text":                add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,txt=(c_txt.strip() if c_txt else ""))
                 st.success("Question ajoutée ✓"); st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<hr>', unsafe_allow_html=True)
-    st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
-    if st.button("← Retour au dashboard", key="qe_back_bot", use_container_width=True): go("admin_dashboard")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    if st.button("← Retour au dashboard",key="qe_back_bot",use_container_width=True): go("admin_dashboard")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  ROUTEUR
-# ══════════════════════════════════════════════════════════════════════════════
-_R = {
-    "home": render_home, "agent_search": render_agent_search,
-    "agent_quiz_code": render_agent_quiz_code, "agent_quiz": render_agent_quiz,
-    "agent_result": render_agent_result, "admin_login": render_admin_login,
-    "admin_dashboard": render_admin_dashboard, "admin_quiz_edit": render_admin_quiz_edit,
-}
-fn = _R.get(st.session_state.get("page","home"))
+# ══════════════════════════════════════════════════════════════
+
+_R={"home":render_home,"agent_search":render_agent_search,"agent_quiz_code":render_agent_quiz_code,
+    "agent_quiz":render_agent_quiz,"agent_result":render_agent_result,
+    "admin_login":render_admin_login,"admin_dashboard":render_admin_dashboard,
+    "admin_quiz_edit":render_admin_quiz_edit}
+
+fn=_R.get(st.session_state.get("page","home"))
 if fn: fn()
 else: go("home")
