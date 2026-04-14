@@ -262,9 +262,6 @@ def get_all_agents():
 def get_agent_by_id(aid):
     return _fetchone("SELECT * FROM agents WHERE id=?", (aid,))
 
-def get_session_by_id(sid):
-    return _fetchone("SELECT * FROM sessions WHERE id=?", (sid,))
-
 def upsert_agents(df):
     n = 0
     for _, row in df.iterrows():
