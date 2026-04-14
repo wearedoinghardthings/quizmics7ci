@@ -37,7 +37,7 @@ if USE_PG:
                 safe_url = urlunparse(p._replace(netloc=f"{safe_user}:{safe_pass}@{host_part}"))
             else:
                 safe_url = DATABASE_URL
-            _pool = psycopg2.pool.SimpleConnectionPool(1, 5, safe_url)
+            _pool = psycopg2.pool.SimpleConnectionPool(2, 20, safe_url)
         return _pool
 
     def get_conn():
@@ -258,6 +258,9 @@ def search_agents(q):
 
 def get_all_agents():
     return _fetchall("SELECT * FROM agents ORDER BY nom,prenom")
+
+def get_agent_by_id(aid):
+    return _fetchone("SELECT * FROM agents WHERE id=?", (aid,))
 
 def upsert_agents(df):
     n = 0

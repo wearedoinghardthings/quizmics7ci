@@ -6,11 +6,12 @@ import pandas as pd
 import json, time, io, re, requests
 from datetime import datetime, timedelta
 
-import config
+import config, hashlib
+from functools import lru_cache
 from database import (
     init_db, search_agents, get_all_agents, upsert_agents,
     set_agent_published, publish_all_agents, unpublish_all_agents,
-    delete_agent, add_agent_manual,
+    get_agent_by_id, delete_agent, add_agent_manual,
     get_quiz_by_code, get_all_quizzes, get_quiz, create_quiz, update_quiz, delete_quiz,
     get_questions, add_question, delete_question, reorder_questions,
     create_session, save_quiz_progress, get_incomplete_session,
@@ -157,6 +158,178 @@ for k,v in _D.items():
 
 
 def go(p): st.session_state.page=p; st.rerun()
+
+
+# ── Persistance de session via URL params (survit au refresh) ─────────────────
+
+def _admin_token():
+    """Token de session admin basé sur le mot de passe + date du jour."""
+    day = datetime.now().strftime("%Y%m%d")
+    raw = f"{config.ADMIN_PASSWORD}{day}"
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+def _save_state():
+    """Écrit l'état minimal dans les query params."""
+    try:
+        params = {}
+        if st.session_state.current_agent:
+            params["a"] = str(st.session_state.current_agent["id"])
+        if st.session_state.admin_logged:
+            params["t"] = _admin_token()
+        if st.session_state.session_id and not st.session_state.quiz_submitted:
+            params["s"] = str(st.session_state.session_id)
+        # Nettoyer les params obsolètes
+        if not st.session_state.current_agent and "a" in st.query_params:
+            del st.query_params["a"]
+        if not st.session_state.admin_logged and "t" in st.query_params:
+            del st.query_params["t"]
+        if (not st.session_state.session_id or st.session_state.quiz_submitted) and "s" in st.query_params:
+            del st.query_params["s"]
+        st.query_params.update(params)
+    except Exception:
+        pass
+
+
+def _restore_state():
+    """Restaure l'état depuis les query params au démarrage."""
+    try:
+        qp = st.query_params
+
+        # Restaurer l'agent
+        if "a" in qp and not st.session_state.current_agent:
+            agent = get_agent_by_id(int(qp["a"]))
+            if agent:
+                st.session_state.current_agent = agent
+
+        # Restaurer le login admin
+        if "t" in qp and not st.session_state.admin_logged:
+            if qp["t"] == _admin_token():
+                st.session_state.admin_logged = True
+
+        # Restaurer une session de quiz en cours
+        if "s" in qp and st.session_state.current_agent and not st.session_state.session_id:
+            from database import get_incomplete_session, get_quiz
+            agent = st.session_state.current_agent
+            # Chercher la session incomplète par ID
+            sid = int(qp["s"])
+            sess = _fetchone_session(sid)
+            if sess and not sess.get("completed"):
+                quiz = get_quiz(sess["quiz_id"])
+                if quiz:
+                    questions = get_questions(quiz["id"])
+                    try:
+                        raw = sess.get("answers_json") or "{}"
+                        answers = json.loads(raw)
+                        answers = {int(k) if str(k).isdigit() else k: v for k,v in answers.items()}
+                    except Exception:
+                        answers = {}
+                    remaining = quiz["duree_minutes"]*60 - (time.time() - float(sess.get("start_time_epoch") or time.time()))
+                    if remaining > 10:
+                        st.session_state.current_quiz = quiz
+                        st.session_state.quiz_questions = questions
+                        st.session_state.quiz_start_time = float(sess.get("start_time_epoch") or time.time())
+                        st.session_state.quiz_answers = answers
+                        st.session_state.session_id = sid
+                        st.session_state.page = "agent_quiz"
+    except Exception:
+        pass
+
+
+def _fetchone_session(sid):
+    """Récupère une session par son ID."""
+    from database import _fetchone as _db_fetchone
+    return _db_fetchone("SELECT * FROM sessions WHERE id=?", (sid,))
+
+
+# Restaurer au démarrage
+_restore_state()
+
+
+def _generate_quiz_pdf(quiz, questions):
+    """Génère un PDF du quiz avec les bonnes réponses via HTML/CSS."""
+    from io import BytesIO
+    import textwrap
+
+    ICONS = {"single": "⭕", "multiple": "☑️", "numeric": "🔢", "text": "📝"}
+    TYPE_LABELS = {"single": "Choix unique", "multiple": "Choix multiple",
+                   "numeric": "Valeur numérique", "text": "Texte libre"}
+
+    rows = ""
+    for i, q in enumerate(questions):
+        pts = f"{q['points']:.0f} pt" + ("s" if q["points"] != 1 else "")
+        rows += f"""
+        <div class="question">
+          <div class="q-header">
+            <span class="q-num">Q{i+1}</span>
+            <span class="q-type">{ICONS[q["type"]]} {TYPE_LABELS[q["type"]]}</span>
+            <span class="q-pts">{pts}</span>
+          </div>
+          <div class="q-text">{q["texte"]}</div>"""
+
+        if q["type"] in ("single", "multiple"):
+            rows += '<div class="options">'
+            for o in q["options"]:
+                cls = "opt-correct" if o["is_correct"] else "opt-normal"
+                icon = "✅" if o["is_correct"] else "☐"
+                rows += f'<div class="{cls}">{icon} {o["texte"]}</div>'
+            rows += '</div>'
+        elif q["type"] == "numeric":
+            rows += f'<div class="answer-box">Réponse : <b>{q["reponse_correcte_num"]}</b></div>'
+        elif q["type"] == "text":
+            raw = q.get("reponse_correcte_txt") or ""
+            if raw:
+                rows += f'<div class="answer-box">Réponse(s) acceptée(s) : <b>{raw}</b></div>'
+            else:
+                rows += '<div class="answer-box" style="color:#888">Question ouverte</div>'
+
+        rows += "</div>"
+
+    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
+    total_pts = sum(q["points"] for q in questions)
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap');
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Outfit', Arial, sans-serif; color: #0F172A; background: #fff; padding: 32px; font-size: 13px; }}
+  .header {{ background: linear-gradient(135deg, #1E3A8A, #1D4ED8); color: white; padding: 24px 28px; border-radius: 12px; margin-bottom: 24px; }}
+  .header h1 {{ font-size: 22px; font-weight: 800; margin-bottom: 4px; }}
+  .header .meta {{ font-size: 12px; opacity: .8; display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }}
+  .header .code {{ background: rgba(255,255,255,.2); padding: 3px 12px; border-radius: 99px; font-weight: 700; }}
+  .question {{ background: #F8FAFF; border: 1.5px solid #E2E8F4; border-left: 4px solid #1D4ED8; border-radius: 0 10px 10px 0; padding: 14px 16px; margin-bottom: 14px; page-break-inside: avoid; }}
+  .q-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }}
+  .q-num {{ background: #EFF6FF; color: #1D4ED8; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 99px; }}
+  .q-type {{ color: #64748B; font-size: 11px; }}
+  .q-pts {{ background: #F1F5F9; color: #64748B; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; margin-left: auto; }}
+  .q-text {{ font-size: 14px; font-weight: 600; margin-bottom: 10px; line-height: 1.45; }}
+  .options {{ display: flex; flex-direction: column; gap: 5px; }}
+  .opt-normal {{ padding: 7px 12px; background: white; border: 1px solid #E2E8F4; border-radius: 7px; font-size: 13px; }}
+  .opt-correct {{ padding: 7px 12px; background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; font-size: 13px; font-weight: 600; color: #065F46; }}
+  .answer-box {{ background: #D1FAE5; border: 1.5px solid #059669; border-radius: 7px; padding: 7px 12px; color: #065F46; font-size: 13px; }}
+  .footer {{ text-align: center; color: #94A3B8; font-size: 11px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #E2E8F4; }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>{quiz["titre"]}</h1>
+    <div class="meta">
+      <span class="code">Code : {quiz["code"]}</span>
+      <span>⏱ {quiz["duree_minutes"]} minutes</span>
+      <span>📝 {len(questions)} question(s)</span>
+      <span>🏆 {total_pts:.0f} point(s) au total</span>
+    </div>
+    {f'<div style="margin-top:8px;font-size:12px;opacity:.75">{quiz["description"]}</div>' if quiz.get("description") else ""}
+  </div>
+  {rows}
+  <div class="footer">Document généré le {now} — QuizAgent CI</div>
+</body>
+</html>"""
+    return html.encode("utf-8")
+
+
 def topbar(t,i="📝"): st.markdown(f'<div class="topbar"><span style="font-size:1.2rem">{i}</span><span class="tt">{t}</span></div>',unsafe_allow_html=True)
 def slbl(t): st.markdown(f'<p class="slbl">{t}</p>',unsafe_allow_html=True)
 def badge(t,c="b"): return f'<span class="badge b{c}">{t}</span>'
@@ -212,7 +385,7 @@ def render_agent_search():
         lbl = f"👤  {a['nom']} {a['prenom']}".strip()
         if a["matricule"]: lbl += f"  ·  {a['matricule']}"
         if st.button(lbl,key=f"sel_{a['id']}",use_container_width=True,type="primary"):
-            st.session_state.current_agent=a; go("agent_quiz_code")
+            st.session_state.current_agent=a; _save_state(); go("agent_quiz_code")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -345,7 +518,7 @@ def render_agent_quiz():
     questions=st.session_state.quiz_questions
     agent=st.session_state.current_agent
 
-    if _AR: st_autorefresh(interval=1000,key="qr")
+    if _AR: st_autorefresh(interval=2000,key="qr")
 
     remaining=max(0,quiz["duree_minutes"]*60-(time.time()-st.session_state.quiz_start_time))
 
@@ -427,8 +600,14 @@ def render_agent_quiz():
 
         st.markdown("")
 
-    # ── Sauvegarde persistante des réponses ──
-    if st.session_state.session_id:
+    st.markdown("---")
+    if st.button("✅  Soumettre mes réponses",key="quiz_submit",type="primary",use_container_width=True):
+        _submit()
+        go("agent_result")
+        return
+
+    # ── Sauvegarde auto des réponses (uniquement si pas en train de soumettre) ──
+    if st.session_state.session_id and not st.session_state.quiz_submitted:
         try:
             save_quiz_progress(
                 st.session_state.session_id,
@@ -436,10 +615,6 @@ def render_agent_quiz():
                 st.session_state.quiz_start_time
             )
         except Exception: pass
-
-    st.markdown("---")
-    if st.button("✅  Soumettre mes réponses",key="quiz_submit",type="primary",use_container_width=True):
-        _submit(); go("agent_result")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -472,7 +647,7 @@ def render_agent_result():
     st.markdown(f'<p style="text-align:center;color:var(--mu);font-size:.82rem;margin:6px 0 14px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>',unsafe_allow_html=True)
     if st.button("🏠  Retour à l'accueil",key="result_home",use_container_width=True):
         for k in("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score"): st.session_state[k]=_D[k]
-        go("home")
+        st.session_state.current_agent=None; _save_state(); go("home")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -490,7 +665,7 @@ def render_admin_login():
         if st.button("← Retour",key="al_back",use_container_width=True): go("home")
     with c2:
         if st.button("Se connecter",key="al_login",type="primary",use_container_width=True):
-            if pwd==config.ADMIN_PASSWORD: st.session_state.admin_logged=True; go("admin_dashboard")
+            if pwd==config.ADMIN_PASSWORD: st.session_state.admin_logged=True; _save_state(); go("admin_dashboard")
             else: st.error("Mot de passe incorrect.")
     st.markdown('</div>',unsafe_allow_html=True)
 
@@ -510,7 +685,7 @@ def render_admin_dashboard():
     with t3: _tab_results()
 
     st.markdown("---")
-    if st.button("🚪  Déconnexion",key="admin_logout",use_container_width=True): st.session_state.admin_logged=False; go("home")
+    if st.button("🚪  Déconnexion",key="admin_logout",use_container_width=True): st.session_state.admin_logged=False; _save_state(); go("home")
 
 
 # ── Vue d'ensemble ────────────────────────────────────────────
@@ -697,6 +872,18 @@ def _tab_quizzes():
                     update_quiz(quiz["id"],quiz["titre"],quiz["code"],quiz["duree_minutes"],quiz["description"],0 if quiz["actif"] else 1,quiz.get("show_score",1),quiz.get("randomize_questions",0)); st.rerun()
             with c3:
                 if st.button("🗑 Suppr.",key=f"dq_{quiz['id']}",use_container_width=True): delete_quiz(quiz["id"]); st.rerun()
+            # Export PDF corrigé
+            if nb > 0:
+                qz_questions = get_questions(quiz["id"])
+                pdf_bytes = _generate_quiz_pdf(quiz, qz_questions)
+                st.download_button(
+                    "📄  Télécharger le corrigé PDF",
+                    data=pdf_bytes,
+                    file_name=f"corrige_{quiz['code']}.html",
+                    mime="text/html",
+                    key=f"pdf_{quiz['id']}",
+                    use_container_width=True,
+                )
 
 
 # ── Résultats ─────────────────────────────────────────────────
