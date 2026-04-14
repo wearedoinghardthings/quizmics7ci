@@ -27,7 +27,17 @@ if USE_PG:
     def _get_pool():
         global _pool
         if _pool is None:
-            _pool = psycopg2.pool.SimpleConnectionPool(1, 5, DATABASE_URL, sslmode="require")
+            from urllib.parse import urlparse, quote, urlunparse
+            p = urlparse(DATABASE_URL)
+            if p.password:
+                safe_pass = quote(p.password, safe="")
+                safe_user = quote(p.username, safe="")
+                host_part = p.hostname
+                if p.port: host_part += f":{p.port}"
+                safe_url = urlunparse(p._replace(netloc=f"{safe_user}:{safe_pass}@{host_part}"))
+            else:
+                safe_url = DATABASE_URL
+            _pool = psycopg2.pool.SimpleConnectionPool(1, 5, safe_url)
         return _pool
 
     def get_conn():
@@ -41,17 +51,23 @@ if USE_PG:
         def __init__(self, conn):
             self._conn = conn
             self._cur  = conn.cursor(cursor_factory=RealDictCursor)
+            self._lastrowid = None
         def execute(self, sql, params=None):
-            # Convertit ? → %s (SQLite → PostgreSQL)
             sql = sql.replace("?", "%s")
-            self._cur.execute(sql, params)
+            # Pour les INSERT, ajoute RETURNING id automatiquement
+            sql_up = sql.strip().upper()
+            if sql_up.startswith("INSERT") and "RETURNING" not in sql_up:
+                sql = sql.rstrip().rstrip(";") + " RETURNING id"
+                self._cur.execute(sql, params)
+                row = self._cur.fetchone()
+                self._lastrowid = row["id"] if row else None
+            else:
+                self._cur.execute(sql, params)
             return self
         def fetchone(self):  return self._cur.fetchone()
         def fetchall(self):  return self._cur.fetchall()
         @property
-        def lastrowid(self):
-            self._cur.execute("SELECT lastval()")
-            return self._cur.fetchone()[0]
+        def lastrowid(self): return self._lastrowid
         def __enter__(self): return self
         def __exit__(self, *a): self._conn.commit()
 
@@ -387,7 +403,7 @@ def get_stats():
     per_quiz = _fetchall("""SELECT q.titre, COUNT(s.id) as nb, AVG(s.score*100.0/s.max_score) as avg_pct
                  FROM sessions s JOIN quizzes q ON s.quiz_id=q.id
                  WHERE s.completed=1 AND s.max_score>0
-                 GROUP BY q.id,q.titre ORDER BY nb DESC""")
+                 GROUP BY q.titre ORDER BY nb DESC""")
     recent = _fetchall("""SELECT a.nom,a.prenom,q.titre,s.score,s.max_score,s.completed_at
                  FROM sessions s JOIN agents a ON s.agent_id=a.id JOIN quizzes q ON s.quiz_id=q.id
                  WHERE s.completed=1 ORDER BY s.completed_at DESC LIMIT 10""")
