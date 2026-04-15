@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Quiz — QuizAgent CI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#2563EB;--blue-d:#1D4ED8;--blue-x:#1E3A8A;
+  --blue-l:#EFF6FF;--blue-m:#BFDBFE;
+  --green:#059669;--orange:#D97706;--red:#DC2626;
+  --bg:#F0F4FF;--surface:#fff;
+  --border:#E2E8F4;--text:#0F172A;--text2:#475569;--text3:#94A3B8;
+  --shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.05);
+  --r:14px;--rs:10px;
+}
+html,body{font-family:'Inter',sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
+.wrap{max-width:600px;margin:0 auto;padding-bottom:100px}
+
+/* Timer fixe */
+#timer-bar{
+  position:fixed;top:0;left:0;right:0;z-index:9999;
+  background:rgba(240,244,255,.95);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  box-shadow:0 2px 20px rgba(0,0,0,.07);
+  padding:8px 16px 7px;
+}
+.timer-inner{max-width:600px;margin:0 auto}
+.tbox{
+  border-radius:var(--rs);padding:12px 20px;
+  display:flex;align-items:center;gap:16px;
+}
+.t-blue{background:linear-gradient(135deg,var(--blue-x),var(--blue));box-shadow:0 4px 16px rgba(37,99,235,.3)}
+.t-orange{background:linear-gradient(135deg,#92400E,var(--orange));box-shadow:0 4px 16px rgba(217,119,6,.3)}
+.t-red{background:linear-gradient(135deg,#7F1D1D,var(--red));box-shadow:0 4px 16px rgba(220,38,38,.35);animation:pulse .65s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.82}}
+.t-ico{font-size:1.8rem}
+.t-time{color:#fff;font-size:2.2rem;font-weight:900;letter-spacing:5px;margin:0;line-height:1;font-variant-numeric:tabular-nums}
+.t-lbl{color:rgba(255,255,255,.72);font-size:.7rem;font-weight:700;margin:4px 0 0;text-transform:uppercase;letter-spacing:.1em}
+.spacer-timer{height:80px}
+
+/* Progress */
+.prog-wrap{padding:12px 16px 4px}
+.prog-top{display:flex;justify-content:space-between;font-size:.82rem;color:var(--text2);font-weight:600;margin-bottom:7px}
+.prog-bg{background:var(--blue-m);border-radius:99px;height:7px;overflow:hidden}
+.prog-fill{background:linear-gradient(90deg,var(--blue),#60A5FA);height:7px;border-radius:99px;transition:width .4s ease}
+
+/* Question */
+.qcard{
+  background:var(--surface);
+  border-left:5px solid var(--blue);
+  border-top:1.5px solid var(--border);
+  border-right:1.5px solid var(--border);
+  border-bottom:1.5px solid var(--border);
+  border-radius:0 var(--r) var(--r) 0;
+  padding:16px 18px 10px;margin:14px 16px 0;
+  box-shadow:var(--shadow);
+}
+.qmeta{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.q-num{background:var(--blue);color:#fff;font-size:.7rem;font-weight:900;padding:3px 10px;border-radius:99px}
+.q-type{color:var(--text3);font-size:.75rem;font-weight:600}
+.q-pts{background:#F1F5F9;color:var(--text2);font-size:.7rem;font-weight:800;padding:3px 10px;border-radius:99px;margin-left:auto}
+.qtext{font-size:15.5px;font-weight:700;color:var(--text);margin:0 0 12px;line-height:1.5}
+
+/* Options */
+.options{display:flex;flex-direction:column;gap:7px;padding:0 0 6px}
+.opt{
+  display:flex;align-items:center;gap:12px;
+  background:var(--bg);border:2px solid var(--border);
+  border-radius:var(--rs);padding:13px 15px;
+  cursor:pointer;transition:all .15s;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+}
+.opt:active{background:var(--blue-l);border-color:var(--blue)}
+.opt.selected{background:var(--blue-l);border-color:var(--blue);color:var(--blue-d)}
+.opt-indicator{
+  width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;
+}
+.opt.selected .opt-indicator{background:var(--blue);border-color:var(--blue)}
+.opt-indicator-sq{border-radius:6px}
+.opt-check{display:none;color:#fff;font-size:.75rem;font-weight:900}
+.opt.selected .opt-check{display:block}
+.opt-text{font-size:15px;font-weight:500;line-height:1.4}
+
+/* Input text/number */
+.q-input{
+  width:100%;padding:13px 16px;font-size:16px;font-family:'Inter',sans-serif;
+  font-weight:500;border:2px solid var(--border);border-radius:var(--rs);
+  background:var(--surface);color:var(--text);outline:none;
+  box-shadow:var(--shadow);transition:border-color .15s;margin-bottom:6px;
+  -webkit-appearance:none;
+}
+.q-input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.1)}
+.q-input::placeholder{color:var(--text3)}
+textarea.q-input{resize:none;min-height:90px}
+
+/* Submit bar */
+.submit-bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:9998;
+  background:rgba(240,244,255,.97);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  padding:12px 16px 16px;box-shadow:0 -4px 20px rgba(0,0,0,.07);
+}
+.submit-inner{max-width:600px;margin:0 auto}
+.prog-mini{font-size:.78rem;color:var(--text2);font-weight:600;text-align:center;margin-bottom:8px}
+.btn-submit{
+  width:100%;padding:16px;font-size:15px;font-family:'Inter',sans-serif;
+  font-weight:800;border:none;border-radius:var(--rs);cursor:pointer;
+  background:linear-gradient(135deg,var(--blue),var(--blue-d));
+  color:#fff;box-shadow:0 4px 15px rgba(37,99,235,.4);
+  transition:all .15s;letter-spacing:-.01em;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn-submit:active{transform:scale(.98)}
+.btn-submit:disabled{opacity:.6;cursor:not-allowed}
+
+/* Loader overlay */
+#overlay{
+  display:none;position:fixed;inset:0;z-index:99999;
+  background:rgba(240,244,255,.95);
+  flex-direction:column;align-items:center;justify-content:center;
+  font-family:'Inter',sans-serif;
+}
+#overlay.show{display:flex}
+.ov-spinner{width:48px;height:48px;border:4px solid var(--blue-m);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin-bottom:16px}
+.ov-text{font-size:1rem;font-weight:700;color:var(--text2)}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div id="timer-bar">
+  <div class="timer-inner">
+    <div class="tbox t-blue" id="tbox">
+      <span class="t-ico" id="t-ico">⏱</span>
+      <div><p class="t-time" id="t-time">--:--</p><p class="t-lbl" id="t-lbl">Temps restant</p></div>
+    </div>
+  </div>
+</div>
+<div class="spacer-timer"></div>
+
+<div class="wrap">
+  <div class="prog-wrap">
+    <div class="prog-top">
+      <span id="quiz-title-prog" style="font-weight:700"></span>
+      <span id="prog-count">0/0 répondue(s)</span>
+    </div>
+    <div class="prog-bg"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <div id="questions-container"></div>
+</div>
+
+<div class="submit-bar">
+  <div class="submit-inner">
+    <div class="prog-mini" id="prog-mini">0 réponse(s) sur 0</div>
+    <button class="btn-submit" id="submit-btn" onclick="submitQuiz()">✅  Soumettre mes réponses</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="ov-spinner"></div>
+  <div class="ov-text">Envoi en cours…</div>
+</div>
+
+<script>
+const SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co";
+const SUPA_KEY = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv";
+
+const headers = {
+  "apikey": SUPA_KEY,
+  "Authorization": "Bearer " + SUPA_KEY,
+  "Content-Type": "application/json",
+  "Prefer": "return=representation"
+};
+
+async function supa(path, opts = {}) {
+  const r = await fetch(SUPA_URL + "/rest/v1/" + path, {
+    headers: { ...headers, ...(opts.headers || {}) },
+    method: opts.method || "GET",
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message || r.statusText); }
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+// ── Charger les données ──
+let agent = null, quiz = null, questions = [], answers = {}, sessionId = null, startEpoch = null;
+let timerInterval = null, autoSaveInterval = null;
+
+async function init() {
+  try {
+    agent     = JSON.parse(sessionStorage.getItem("qa_agent") || "null");
+    quiz      = JSON.parse(sessionStorage.getItem("qa_quiz") || "null");
+    sessionId = parseInt(sessionStorage.getItem("qa_session_id") || "0");
+    startEpoch = parseFloat(sessionStorage.getItem("qa_start_epoch") || (Date.now()/1000));
+
+    if (!agent || !quiz || !sessionId) { window.location.href = "index.html"; return; }
+
+    // Charger les questions
+    const qs = await supa(`questions?quiz_id=eq.${quiz.id}&order=ordre.asc`);
+    for (const q of qs) {
+      if (q.type === "single" || q.type === "multiple") {
+        const opts = await supa(`options?question_id=eq.${q.id}&order=id.asc`);
+        q.options = opts || [];
+      } else {
+        q.options = [];
+      }
+    }
+    questions = qs;
+
+    // Shuffler si nécessaire
+    if (quiz.randomize_questions) {
+      for (let i = questions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [questions[i], questions[j]] = [questions[j], questions[i]];
+      }
+    }
+
+    // Restaurer réponses si session incomplète
+    const sessData = await supa(`sessions?id=eq.${sessionId}&limit=1`);
+    if (sessData && sessData[0] && sessData[0].answers_json) {
+      try {
+        const saved = JSON.parse(sessData[0].answers_json || "{}");
+        Object.assign(answers, saved);
+      } catch(e) {}
+    }
+
+    // Mettre à jour max_score
+    const maxScore = questions.reduce((s, q) => s + q.points, 0);
+    await supa(`sessions?id=eq.${sessionId}`, { method: "PATCH", body: { max_score: maxScore } });
+
+    renderQuestions();
+    startTimer();
+    autoSaveInterval = setInterval(autoSave, 5000);
+
+  } catch(e) {
+    alert("Erreur de chargement : " + e.message + "\nRetour à l'accueil.");
+    window.location.href = "index.html";
+  }
+}
+
+// ── Rendu questions ──
+function renderQuestions() {
+  document.getElementById("quiz-title-prog").textContent = quiz.titre;
+  const container = document.getElementById("questions-container");
+
+  const ICONS = {single:"⭕",multiple:"☑️",numeric:"🔢",text:"📝"};
+  const HINTS = {single:"Une seule réponse",multiple:"Plusieurs réponses",numeric:"Entrez un nombre",text:"Réponse libre"};
+
+  container.innerHTML = questions.map((q, i) => {
+    const pts = `${q.points} pt${q.points !== 1 ? "s" : ""}`;
+    let inputHtml = "";
+
+    if (q.type === "single") {
+      inputHtml = `<div class="options">` + q.options.map(o =>
+        `<div class="opt ${answers[q.id] == o.id ? 'selected' : ''}" onclick="selectSingle(${q.id},${o.id},this)">
+          <div class="opt-indicator"><span class="opt-check">✓</span></div>
+          <span class="opt-text">${o.texte}</span>
+        </div>`
+      ).join("") + `</div>`;
+    } else if (q.type === "multiple") {
+      const cur = answers[q.id] || [];
+      inputHtml = `<div class="options">` + q.options.map(o =>
+        `<div class="opt ${cur.includes(o.id) ? 'selected' : ''}" onclick="toggleMultiple(${q.id},${o.id},this)">
+          <div class="opt-indicator opt-indicator-sq"><span class="opt-check">✓</span></div>
+          <span class="opt-text">${o.texte}</span>
+        </div>`
+      ).join("") + `</div>`;
+    } else if (q.type === "numeric") {
+      inputHtml = `<input type="number" class="q-input" id="q_${q.id}" placeholder="Entrez un nombre…"
+        value="${answers[q.id] || ''}" oninput="answers[${q.id}]=this.value;updateProgress()" inputmode="decimal">`;
+    } else {
+      inputHtml = `<textarea class="q-input" id="q_${q.id}" placeholder="Votre réponse…"
+        oninput="answers[${q.id}]=this.value;updateProgress()">${answers[q.id] || ''}</textarea>`;
+    }
+
+    return `
+    <div class="qcard" id="qcard_${q.id}">
+      <div class="qmeta">
+        <span class="q-num">Q${i+1}</span>
+        <span class="q-type">${ICONS[q.type]} ${HINTS[q.type]}</span>
+        <span class="q-pts">${pts}</span>
+      </div>
+      <p class="qtext">${q.texte}</p>
+      ${inputHtml}
+    </div>`;
+  }).join("");
+
+  updateProgress();
+}
+
+function selectSingle(qid, oid, el) {
+  answers[qid] = oid;
+  const card = document.getElementById(`qcard_${qid}`);
+  card.querySelectorAll(".opt").forEach(o => o.classList.remove("selected"));
+  el.classList.add("selected");
+  updateProgress();
+}
+
+function toggleMultiple(qid, oid, el) {
+  if (!answers[qid]) answers[qid] = [];
+  const idx = answers[qid].indexOf(oid);
+  if (idx === -1) { answers[qid].push(oid); el.classList.add("selected"); }
+  else { answers[qid].splice(idx, 1); el.classList.remove("selected"); }
+  updateProgress();
+}
+
+function updateProgress() {
+  const total = questions.length;
+  const answered = questions.filter(q => {
+    const a = answers[q.id];
+    if (a === undefined || a === null || a === "") return false;
+    if (Array.isArray(a)) return a.length > 0;
+    return true;
+  }).length;
+  const pct = total > 0 ? (answered / total * 100) : 0;
+  document.getElementById("prog-fill").style.width = pct + "%";
+  document.getElementById("prog-count").textContent = `${answered}/${total} répondue(s)`;
+  document.getElementById("prog-mini").textContent = `${answered} réponse(s) sur ${total}`;
+}
+
+// ── Timer ──
+function startTimer() {
+  function tick() {
+    const remaining = Math.max(0, quiz.duree_minutes * 60 - (Date.now()/1000 - startEpoch));
+    const mins = Math.floor(remaining / 60);
+    const secs = Math.floor(remaining % 60);
+    document.getElementById("t-time").textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+
+    const tbox = document.getElementById("tbox");
+    const tico = document.getElementById("t-ico");
+    const tlbl = document.getElementById("t-lbl");
+
+    tbox.className = "tbox " + (remaining > 300 ? "t-blue" : remaining > 60 ? "t-orange" : "t-red");
+    tico.textContent = remaining > 300 ? "⏱" : remaining > 60 ? "⚠️" : "🚨";
+    tlbl.textContent = remaining > 300 ? "Temps restant" : remaining > 60 ? "Moins de 5 min !" : "Dépêchez-vous !";
+
+    if (remaining <= 0) {
+      clearInterval(timerInterval);
+      clearInterval(autoSaveInterval);
+      submitQuiz(true);
+    }
+  }
+  tick();
+  timerInterval = setInterval(tick, 1000);
+}
+
+// ── Sauvegarde auto ──
+async function autoSave() {
+  try {
+    await supa(`sessions?id=eq.${sessionId}`, {
+      method: "PATCH",
+      body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch }
+    });
+  } catch(e) {}
+}
+
+// ── Calcul score ──
+function calcScore() {
+  let score = 0;
+  const records = [];
+  for (const q of questions) {
+    const resp = answers[q.id];
+    let ok = 0;
+    if (q.type === "single") {
+      const correct = q.options.filter(o => o.is_correct).map(o => o.id);
+      ok = correct.includes(resp) ? 1 : 0;
+    } else if (q.type === "multiple") {
+      const correct = new Set(q.options.filter(o => o.is_correct).map(o => o.id));
+      const given = new Set(Array.isArray(resp) ? resp : []);
+      ok = (correct.size > 0 && [...correct].every(id => given.has(id)) && [...given].every(id => correct.has(id))) ? 1 : 0;
+    } else if (q.type === "numeric") {
+      const exp = q.reponse_correcte_num !== null ? parseFloat(q.reponse_correcte_num) : null;
+      const giv = resp !== undefined && resp !== "" ? parseFloat(String(resp).replace(",",".")) : null;
+      ok = (exp !== null && giv !== null && Math.abs(giv - exp) < 0.01) ? 1 : 0;
+    } else if (q.type === "text") {
+      const raw = (q.reponse_correcte_txt || "").trim();
+      if (raw) {
+        const acceptable = raw.split("|").map(s => s.toLowerCase().trim());
+        ok = acceptable.includes((resp || "").toLowerCase().trim()) ? 1 : 0;
+      } else { ok = 1; }
+    }
+    if (ok) score += q.points;
+    records.push({ session_id: sessionId, question_id: q.id, reponse: JSON.stringify(resp), is_correct: ok });
+  }
+  return { score, records };
+}
+
+// ── Soumettre ──
+let submitting = false;
+async function submitQuiz(auto = false) {
+  if (submitting) return;
+  submitting = true;
+  clearInterval(timerInterval);
+  clearInterval(autoSaveInterval);
+
+  if (!auto) {
+    const ok = confirm("Soumettre vos réponses maintenant ? Cette action est irréversible.");
+    if (!ok) { submitting = false; startTimer(); autoSaveInterval = setInterval(autoSave, 5000); return; }
+  }
+
+  document.getElementById("overlay").classList.add("show");
+
+  try {
+    const { score, records } = calcScore();
+    const maxScore = questions.reduce((s, q) => s + q.points, 0);
+
+    // Sauvegarder session
+    await supa(`sessions?id=eq.${sessionId}`, {
+      method: "PATCH",
+      body: { score, max_score: maxScore, completed: 1, completed_at: new Date().toISOString(), answers_json: JSON.stringify(answers) }
+    });
+
+    // Sauvegarder réponses
+    for (const rec of records) {
+      await supa("answers", { method: "POST", body: rec });
+    }
+
+    // Stocker résultat et rediriger
+    sessionStorage.setItem("qa_result", JSON.stringify({
+      score, max_score: maxScore,
+      show_score: quiz.show_score,
+      agent_nom: agent.nom, agent_prenom: agent.prenom || "",
+      quiz_titre: quiz.titre
+    }));
+    window.location.href = "result.html";
+
+  } catch(e) {
+    alert("Erreur lors de la soumission : " + e.message);
+    document.getElementById("overlay").classList.remove("show");
+    submitting = false;
+    startTimer();
+    autoSaveInterval = setInterval(autoSave, 5000);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

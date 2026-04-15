@@ -1,1 +1,337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>QuizAgent CI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#2563EB;--blue-d:#1D4ED8;--blue-x:#1E3A8A;
+  --blue-l:#EFF6FF;--blue-m:#BFDBFE;
+  --green:#059669;--red:#DC2626;
+  --bg:#F0F4FF;--surface:#fff;
+  --border:#E2E8F4;--text:#0F172A;--text2:#475569;--text3:#94A3B8;
+  --shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.05);
+  --shadow-b:0 8px 32px rgba(37,99,235,.22);
+  --r:14px;--rs:10px;
+}
+html,body{font-family:'Inter',sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
+.wrap{max-width:600px;margin:0 auto}
 
+/* Hero */
+.hero{
+  background:linear-gradient(145deg,var(--blue-x) 0%,var(--blue-d) 45%,#3B82F6 100%);
+  padding:52px 28px 48px;text-align:center;
+  position:relative;overflow:hidden;
+}
+.hero::before{content:'';position:absolute;top:-80px;right:-80px;width:300px;height:300px;border-radius:50%;background:rgba(255,255,255,.05)}
+.hero::after{content:'';position:absolute;bottom:-100px;left:-60px;width:280px;height:280px;border-radius:50%;background:rgba(255,255,255,.04)}
+.hero-badge{display:inline-block;background:rgba(255,255,255,.15);color:rgba(255,255,255,.9);font-size:.72rem;font-weight:700;padding:5px 14px;border-radius:99px;margin-bottom:16px;letter-spacing:.06em;text-transform:uppercase;position:relative;z-index:1}
+.hero-icon{font-size:3.2rem;margin-bottom:12px;position:relative;z-index:1}
+.hero-title{color:#fff;font-size:2.1rem;font-weight:900;letter-spacing:-.05em;line-height:1.1;margin-bottom:8px;position:relative;z-index:1}
+.hero-sub{color:rgba(255,255,255,.7);font-size:1rem;position:relative;z-index:1}
+
+/* Content */
+.content{padding:24px 16px}
+
+.slbl{font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin:0 0 8px;display:block}
+
+/* Input */
+.input-wrap{position:relative;margin-bottom:12px}
+.input-wrap input{
+  width:100%;padding:14px 16px;font-size:16px;font-family:'Inter',sans-serif;
+  font-weight:500;border:2px solid var(--border);border-radius:var(--rs);
+  background:var(--surface);color:var(--text);
+  box-shadow:var(--shadow);transition:border-color .15s,box-shadow .15s;
+  outline:none;-webkit-appearance:none;
+}
+.input-wrap input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.12)}
+.input-wrap input::placeholder{color:var(--text3)}
+
+/* Boutons */
+.btn{
+  width:100%;padding:16px;font-size:15px;font-family:'Inter',sans-serif;
+  font-weight:700;border:none;border-radius:var(--rs);cursor:pointer;
+  transition:all .18s ease;min-height:52px;letter-spacing:-.01em;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn-primary{
+  background:linear-gradient(135deg,var(--blue),var(--blue-d));
+  color:#fff;box-shadow:0 4px 15px rgba(37,99,235,.4);
+}
+.btn-primary:active{transform:scale(.98);box-shadow:0 2px 8px rgba(37,99,235,.3)}
+.btn-secondary{background:var(--surface);color:var(--text);border:2px solid var(--border);box-shadow:var(--shadow)}
+.btn-secondary:active{background:var(--blue-l);border-color:var(--blue);color:var(--blue)}
+
+/* Agent card */
+.agent-card{
+  display:flex;align-items:center;gap:14px;
+  background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--r);padding:16px;margin-bottom:12px;
+  box-shadow:var(--shadow);cursor:pointer;transition:all .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.agent-card:active{border-color:var(--blue);background:var(--blue-l)}
+.agent-av{
+  width:44px;height:44px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue-m),var(--blue-l));
+  color:var(--blue-d);font-weight:800;font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+}
+.agent-name{font-weight:700;font-size:15px;color:var(--text)}
+.agent-mat{font-size:.8rem;color:var(--text3);margin-top:2px}
+
+/* Étapes */
+.step{display:none}
+.step.active{display:block}
+
+/* Step indicator */
+.step-info{
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--r);padding:14px 16px;margin-bottom:20px;
+  box-shadow:var(--shadow);
+}
+.step-av{
+  width:40px;height:40px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue-m),var(--blue-l));
+  color:var(--blue-d);font-weight:800;font-size:13px;
+  display:flex;align-items:center;justify-content:center;
+}
+.step-name{font-weight:700;font-size:1rem;color:var(--text)}
+.step-sub{font-size:.8rem;color:var(--text3);margin-top:2px}
+
+/* Loader */
+.loader{display:none;text-align:center;padding:24px;color:var(--text2);font-size:.9rem}
+.loader.show{display:block}
+.spinner{width:32px;height:32px;border:3px solid var(--blue-m);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Alert */
+.alert{padding:13px 16px;border-radius:var(--rs);font-size:.9rem;font-weight:500;margin-bottom:12px;display:none}
+.alert.show{display:block}
+.alert-error{background:#FEE2E2;color:#991B1B;border:1.5px solid #FCA5A5}
+.alert-warn{background:#FEF3C7;color:#92400E;border:1.5px solid #FCD34D}
+
+/* No results */
+.no-results{text-align:center;padding:24px;color:var(--text3);font-size:.9rem}
+
+/* Spacer */
+.spacer{height:16px}
+.spacer2{height:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="hero-badge">📋 Plateforme d'évaluation</div>
+    <div class="hero-icon">📝</div>
+    <h1 class="hero-title">QuizAgent CI</h1>
+    <p class="hero-sub">Évaluation des agents de terrain</p>
+  </div>
+
+  <div class="content">
+
+    <!-- ÉTAPE 1 : Recherche agent -->
+    <div class="step active" id="step1">
+      <span class="slbl">Tapez votre nom ou matricule</span>
+      <div class="input-wrap">
+        <input type="text" id="search-input" placeholder="Ex : Konan, Diallo, AGT001…" autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div class="alert alert-error" id="search-error"></div>
+      <div class="loader" id="search-loader">
+        <div class="spinner"></div>
+        Recherche en cours…
+      </div>
+      <div id="agents-list"></div>
+    </div>
+
+    <!-- ÉTAPE 2 : Code quiz -->
+    <div class="step" id="step2">
+      <div class="step-info" id="agent-info-display"></div>
+      <span class="slbl">Code du quiz — communiqué par votre superviseur</span>
+      <div class="input-wrap">
+        <input type="text" id="code-input" placeholder="Ex : QZ001" maxlength="20" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <div class="alert alert-error" id="code-error"></div>
+      <div class="alert alert-warn" id="code-warn"></div>
+      <div class="loader" id="code-loader">
+        <div class="spinner"></div>
+        Vérification du code…
+      </div>
+      <div class="spacer2"></div>
+      <button class="btn btn-primary" id="start-btn" onclick="startQuiz()">▶  Commencer le quiz</button>
+      <div class="spacer2"></div>
+      <button class="btn btn-secondary" onclick="backToSearch()">← Retour</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co";
+const SUPA_KEY = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv";
+
+let selectedAgent = null;
+let searchTimer = null;
+
+const headers = {
+  "apikey": SUPA_KEY,
+  "Authorization": "Bearer " + SUPA_KEY,
+  "Content-Type": "application/json",
+  "Prefer": "return=representation"
+};
+
+async function supabase(path, opts = {}) {
+  const r = await fetch(SUPA_URL + "/rest/v1/" + path, {
+    headers: { ...headers, ...(opts.headers || {}) },
+    method: opts.method || "GET",
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || r.statusText);
+  }
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+// ── Recherche ──
+document.getElementById("search-input").addEventListener("input", function() {
+  clearTimeout(searchTimer);
+  const q = this.value.trim();
+  document.getElementById("agents-list").innerHTML = "";
+  document.getElementById("search-error").classList.remove("show");
+  if (q.length < 2) return;
+  searchTimer = setTimeout(() => searchAgents(q), 300);
+});
+
+async function searchAgents(q) {
+  const loader = document.getElementById("search-loader");
+  const list = document.getElementById("agents-list");
+  loader.classList.add("show");
+  list.innerHTML = "";
+  try {
+    const qLow = q.toLowerCase();
+    const agents = await supabase(
+      `agents?select=id,nom,prenom,matricule&published=eq.1&or=(nom.ilike.*${encodeURIComponent(q)}*,prenom.ilike.*${encodeURIComponent(q)}*,matricule.ilike.*${encodeURIComponent(q)}*)&order=nom.asc&limit=15`
+    );
+    if (!agents || agents.length === 0) {
+      list.innerHTML = '<div class="no-results">Aucun agent trouvé. Contactez votre superviseur.</div>';
+      return;
+    }
+    list.innerHTML = agents.map(a => {
+      const init = (a.nom[0] + (a.prenom ? a.prenom[0] : "")).toUpperCase();
+      const mat = a.matricule ? `<div class="agent-mat">${a.matricule}</div>` : "";
+      return `<div class="agent-card" onclick="selectAgent(${JSON.stringify(a).replace(/"/g,'&quot;')})">
+        <div class="agent-av">${init}</div>
+        <div><div class="agent-name">${a.nom} ${a.prenom || ""}</div>${mat}</div>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    document.getElementById("search-error").textContent = "Erreur de connexion. Réessayez.";
+    document.getElementById("search-error").classList.add("show");
+  } finally {
+    loader.classList.remove("show");
+  }
+}
+
+function selectAgent(agent) {
+  selectedAgent = agent;
+  const init = (agent.nom[0] + (agent.prenom ? agent.prenom[0] : "")).toUpperCase();
+  document.getElementById("agent-info-display").innerHTML = `
+    <div class="step-av">${init}</div>
+    <div>
+      <div class="step-name">${agent.nom} ${agent.prenom || ""}</div>
+      <div class="step-sub">${agent.matricule || "Agent de terrain"}</div>
+    </div>`;
+  document.getElementById("step1").classList.remove("active");
+  document.getElementById("step2").classList.add("active");
+  setTimeout(() => document.getElementById("code-input").focus(), 100);
+}
+
+function backToSearch() {
+  selectedAgent = null;
+  document.getElementById("step2").classList.remove("active");
+  document.getElementById("step1").classList.add("active");
+  document.getElementById("code-input").value = "";
+  document.getElementById("code-error").classList.remove("show");
+  document.getElementById("code-warn").classList.remove("show");
+}
+
+// ── Démarrer quiz ──
+async function startQuiz() {
+  const code = document.getElementById("code-input").value.trim().toUpperCase();
+  const errEl = document.getElementById("code-error");
+  const warnEl = document.getElementById("code-warn");
+  const loader = document.getElementById("code-loader");
+  errEl.classList.remove("show"); warnEl.classList.remove("show");
+
+  if (!code) { errEl.textContent = "Saisissez un code."; errEl.classList.add("show"); return; }
+
+  loader.classList.add("show");
+  document.getElementById("start-btn").disabled = true;
+
+  try {
+    // Chercher le quiz
+    const quizzes = await supabase(`quizzes?code=eq.${encodeURIComponent(code)}&actif=eq.1&limit=1`);
+    if (!quizzes || quizzes.length === 0) {
+      errEl.textContent = "Code incorrect ou quiz désactivé."; errEl.classList.add("show");
+      return;
+    }
+    const quiz = quizzes[0];
+
+    // Vérifier si déjà complété
+    const done = await supabase(`sessions?agent_id=eq.${selectedAgent.id}&quiz_id=eq.${quiz.id}&completed=eq.1&limit=1`);
+    if (done && done.length > 0) {
+      warnEl.textContent = "Vous avez déjà soumis ce quiz. Contactez votre superviseur.";
+      warnEl.classList.add("show"); return;
+    }
+
+    // Chercher session incomplète existante
+    const incomplete = await supabase(`sessions?agent_id=eq.${selectedAgent.id}&quiz_id=eq.${quiz.id}&completed=eq.0&order=started_at.desc&limit=1`);
+    let sessionId = null;
+    let startEpoch = Date.now() / 1000;
+
+    if (incomplete && incomplete.length > 0) {
+      const sess = incomplete[0];
+      const epoch = parseFloat(sess.start_time_epoch || startEpoch);
+      const remaining = quiz.duree_minutes * 60 - (Date.now() / 1000 - epoch);
+      if (remaining > 15) {
+        sessionId = sess.id;
+        startEpoch = epoch;
+      }
+    }
+
+    if (!sessionId) {
+      const maxScore = 0; // sera calculé côté quiz.html
+      const newSess = await supabase("sessions", {
+        method: "POST",
+        body: { agent_id: selectedAgent.id, quiz_id: quiz.id, max_score: maxScore, start_time_epoch: startEpoch, answers_json: "{}", completed: 0 }
+      });
+      sessionId = Array.isArray(newSess) ? newSess[0].id : newSess.id;
+    }
+
+    // Stocker en sessionStorage et rediriger
+    sessionStorage.setItem("qa_agent", JSON.stringify(selectedAgent));
+    sessionStorage.setItem("qa_quiz", JSON.stringify(quiz));
+    sessionStorage.setItem("qa_session_id", sessionId);
+    sessionStorage.setItem("qa_start_epoch", startEpoch);
+    window.location.href = "quiz.html";
+
+  } catch(e) {
+    errEl.textContent = "Erreur : " + e.message; errEl.classList.add("show");
+  } finally {
+    loader.classList.remove("show");
+    document.getElementById("start-btn").disabled = false;
+  }
+}
+
+// Enter key sur code
+document.getElementById("code-input").addEventListener("keydown", e => { if (e.key === "Enter") startQuiz(); });
+</script>
+</body>
+</html>
