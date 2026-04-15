@@ -206,16 +206,19 @@ async function init() {
 
     if (!agent || !quiz || !sessionId) { window.location.href = "index.html"; return; }
 
-    // Charger les questions
+    // Charger questions puis toutes les options en 2 requêtes parallèles
     const qs = await supa(`questions?quiz_id=eq.${quiz.id}&order=ordre.asc`);
-    for (const q of qs) {
-      if (q.type === "single" || q.type === "multiple") {
-        const opts = await supa(`options?question_id=eq.${q.id}&order=id.asc`);
-        q.options = opts || [];
-      } else {
-        q.options = [];
-      }
-    }
+    const qIds = qs.map(q => q.id).join(",");
+    const allOpts = qIds.length > 0
+      ? await supa(`options?question_id=in.(${qIds})&order=question_id.asc,id.asc`)
+      : [];
+    // Grouper les options par question
+    const optsMap = {};
+    (allOpts || []).forEach(o => {
+      if (!optsMap[o.question_id]) optsMap[o.question_id] = [];
+      optsMap[o.question_id].push(o);
+    });
+    qs.forEach(q => { q.options = optsMap[q.id] || []; });
     questions = qs;
 
     // Shuffler si nécessaire
