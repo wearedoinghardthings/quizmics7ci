@@ -1319,12 +1319,21 @@ def _tab_quizzes():
                 if st.button("🗑 Suppr.", key=f"dq_{quiz['id']}", use_container_width=True):
                     delete_quiz(quiz["id"]); st.rerun()
             if nb > 0:
-                qs = get_questions(quiz["id"])
-                pdf_data = _make_pdf(quiz, qs)
-                st.download_button("📄  Corrigé PDF", data=pdf_data,
-                                    file_name=f"corrige_{quiz['code']}.pdf",
-                                    mime="application/pdf",
-                                    key=f"pdf_{quiz['id']}", use_container_width=True)
+                # PDF généré à la demande — pas au chargement
+                if st.button("📄  Télécharger le corrigé PDF", key=f"pdfbtn_{quiz['id']}", use_container_width=True):
+                    try:
+                        from fpdf import FPDF
+                        qs_pdf = get_questions(quiz["id"])
+                        pdf_data = _make_pdf(quiz, qs_pdf)
+                        st.download_button("⬇️  Cliquez ici pour télécharger",
+                                            data=pdf_data,
+                                            file_name=f"corrige_{quiz['code']}.pdf",
+                                            mime="application/pdf",
+                                            key=f"pdf_dl_{quiz['id']}", use_container_width=True)
+                    except ImportError:
+                        st.error("fpdf2 non installé. Vérifiez requirements.txt.")
+                    except Exception as e:
+                        st.error(f"Erreur PDF : {e}")
 
 
 # ── Résultats ─────────────────────────────────────────────────────────────────
