@@ -19,17 +19,6 @@ from database import (
     get_question_stats,
 )
 
-
-def _fmt(t):
-    """**gras** *italic* [rouge/bleu/vert/orange]texte[/couleur] newline=<br>"""
-    import re as _r
-    t = str(t)
-    t = _r.sub(r'[*][*](.+?)[*][*]', r'<b></b>', t)
-    t = _r.sub(r'[*]([^*]+?)[*]',    r'<i></i>', t)
-    for c,h in [('rouge','#DC2626'),('bleu','#1D4ED8'),('vert','#059669'),('orange','#D97706')]:
-        t = _r.sub(rf'\[{c}\](.+?)\[/{c}\]', rf'<span style="color:{h};font-weight:700">\1</span>', t)
-    return t.replace('\n','<br>')
-
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
                    layout="centered", initial_sidebar_state="collapsed")
 
@@ -43,7 +32,7 @@ st.markdown("""
 <style>
 *,*::before,*::after{box-sizing:border-box}
 html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-family:'Outfit',sans-serif!important}
-#MainMenu,footer,header,.stDeployButton{display:none!important}
+#MainMenu,footer,header,.stDeployButton,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"],.stAppDeployButton{display:none!important}
 .main,.main>div,section.main,.appview-container,.block-container{overflow:visible!important}
 .block-container{padding:0 1rem 5rem!important;max-width:640px!important;margin:0 auto!important}
 :root{
@@ -149,6 +138,28 @@ div[data-testid="stExpander"] summary{font-family:'Outfit',sans-serif!important;
 div[data-testid="stForm"]{border:none!important;padding:0!important}
 hr{border:none!important;border-top:1.5px solid var(--bor)!important;margin:18px 0!important}
 .stAlert{border-radius:var(--r)!important;font-family:'Outfit',sans-serif!important}
+/* ── Éditeur riche ── */
+.rte-toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;padding:8px 10px;background:var(--bg);border:1.5px solid var(--bor);border-radius:10px 10px 0 0;border-bottom:none}
+.rte-toolbar button{background:var(--sur);border:1.5px solid var(--bor);border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:'Outfit',sans-serif;font-weight:600;transition:all .12s;color:var(--txt)}
+.rte-toolbar button:hover{background:var(--Bl);border-color:var(--B);color:var(--B)}
+.rte-editor{width:100%;min-height:110px;border:1.5px solid var(--bor);border-radius:0 0 10px 10px;padding:10px 12px;font-size:15px;font-family:'Outfit',sans-serif;background:var(--sur);color:var(--txt);outline:none;resize:vertical}
+.rte-editor:focus{border-color:var(--B);box-shadow:0 0 0 3px rgba(29,78,216,.1)}
+.rte-preview{font-size:15px;font-weight:600;color:var(--txt);line-height:1.5;margin:4px 0 8px;padding:8px 10px;background:var(--Bl);border-radius:8px;border-left:3px solid var(--B)}
+/* ── Stats questions ── */
+.qstat-card{background:var(--sur);border:1.5px solid var(--bor);border-radius:var(--r);padding:14px 16px;margin:6px 0;box-shadow:var(--sh)}
+.qstat-header{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px}
+.qstat-num{background:var(--R);color:#fff;font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px;flex-shrink:0;margin-top:2px}
+.qstat-num-ok{background:var(--G)}
+.qstat-num-mid{background:var(--O)}
+.qstat-txt{font-size:13.5px;font-weight:600;color:var(--txt);line-height:1.4;flex:1}
+.qstat-bar-wrap{display:flex;align-items:center;gap:10px;margin-top:6px}
+.qstat-bar-bg{flex:1;background:#FEE2E2;border-radius:99px;height:8px}
+.qstat-bar-fill{height:8px;border-radius:99px}
+.qstat-meta{display:flex;gap:12px;margin-top:6px;flex-wrap:wrap}
+.qstat-pill{font-size:.75rem;font-weight:700;padding:2px 9px;border-radius:99px}
+.pill-err{background:#FEE2E2;color:#991B1B}
+.pill-ok{background:#D1FAE5;color:#065F46}
+.pill-tot{background:var(--Bm);color:var(--Bd)}
 </style>""", unsafe_allow_html=True)
 
 init_db()
@@ -345,6 +356,64 @@ def _generate_quiz_pdf(quiz, questions):
 def topbar(t,i="📝"): st.markdown(f'<div class="topbar"><span style="font-size:1.2rem">{i}</span><span class="tt">{t}</span></div>',unsafe_allow_html=True)
 def slbl(t): st.markdown(f'<p class="slbl">{t}</p>',unsafe_allow_html=True)
 def badge(t,c="b"): return f'<span class="badge b{c}">{t}</span>'
+
+def rich_text_editor(label, key, default_value="", height=110):
+    """Éditeur de texte avec boutons de mise en forme (gras, couleur, saut de ligne)."""
+    current = st.session_state.get(f"_rte_{key}", default_value)
+    st.markdown(f'<div style="font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">{label}</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="rte-toolbar" id="tb_{key}">
+      <button onclick="rteFormat('{key}','bold')" title="Gras"><b>G</b></button>
+      <button onclick="rteFormat('{key}','color_red')"   style="color:#DC2626">● Rouge</button>
+      <button onclick="rteFormat('{key}','color_blue')"  style="color:#1D4ED8">● Bleu</button>
+      <button onclick="rteFormat('{key}','color_green')" style="color:#059669">● Vert</button>
+      <button onclick="rteFormat('{key}','color_orange')"style="color:#D97706">● Orange</button>
+      <button onclick="rteFormat('{key}','newline')" title="Nouvelle ligne">↵ Ligne</button>
+    </div>
+    <script>
+    function rteFormat(key, action) {{
+      var ta = document.getElementById('rte_' + key);
+      if (!ta) return;
+      var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, sel = v.substring(s,e);
+      var ins = '';
+      if (action === 'bold')         ins = '<b>' + (sel||'texte') + '</b>';
+      else if (action === 'color_red')    ins = '<span style="color:#DC2626">' + (sel||'texte') + '</span>';
+      else if (action === 'color_blue')   ins = '<span style="color:#1D4ED8">' + (sel||'texte') + '</span>';
+      else if (action === 'color_green')  ins = '<span style="color:#059669">' + (sel||'texte') + '</span>';
+      else if (action === 'color_orange') ins = '<span style="color:#D97706">' + (sel||'texte') + '</span>';
+      else if (action === 'newline')      ins = (sel||'') + '<br>';
+      ta.value = v.substring(0,s) + ins + v.substring(e);
+      ta.selectionStart = ta.selectionEnd = s + ins.length;
+      ta.dispatchEvent(new Event('input', {{bubbles:true}}));
+    }}
+    </script>
+    """, unsafe_allow_html=True)
+    # Streamlit text_area caché pour récupérer la valeur
+    val = st.text_area(
+        " ", value=current, key=f"_rte_{key}", height=height,
+        label_visibility="collapsed",
+        placeholder="Saisissez votre question… Utilisez les boutons ci-dessus pour la mise en forme.",
+        help="Sélectionnez du texte puis cliquez sur un bouton de formatage. Les balises HTML <b>, <span style=...> et <br> sont supportées."
+    )
+    st.markdown(f"""<script>
+    (function() {{
+      var ta = document.querySelector('[data-testid="stTextArea"] textarea[aria-label=" "]');
+      if (ta && !ta.id) {{
+        // Trouve le bon textarea par ordre d'apparition dans la page
+      }}
+      // Associer l'id au textarea correspondant à cette clé
+      var areas = document.querySelectorAll('.stTextArea textarea');
+      areas.forEach(function(a) {{
+        if (a.closest('[data-testid="column"]') || true) {{
+          // heuristique : le dernier textarea sans id rte_ est le nôtre
+          if (!a.id || !a.id.startsWith('rte_')) {{
+            a.id = 'rte_{key}';
+          }}
+        }}
+      }});
+    }})();
+    </script>""", unsafe_allow_html=True)
+    return val
 
 def kpi_grid(items):
     """items = [(icon, value, label, color_class), ...]"""
@@ -582,7 +651,7 @@ def render_agent_quiz():
             f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
             f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
             f'<span class="qpts">{pts}</span></div>'
-            f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
+            f'<p class="qtxt">{q["texte"]}</p></div>', unsafe_allow_html=True)
 
         if q["type"]=="single":
             opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
@@ -690,7 +759,7 @@ def render_admin_dashboard():
     if not st.session_state.admin_logged: go("admin_login"); return
     topbar(config.APP_TITLE+"  ·  Tableau de bord","⚙️")
 
-    t0,t1,t2,t3,t4=st.tabs(["📊 Vue d'ensemble","👥 Agents","📝 Quiz","📋 Résultats","🔍 Stats questions"])
+    t0,t1,t2,t3,t4=st.tabs(["📊 Vue d'ensemble","👥 Agents","📝 Quiz","📋 Résultats","📉 Stats questions"])
     with t0: _tab_overview()
     with t1: _tab_agents()
     with t2: _tab_quizzes()
@@ -926,6 +995,114 @@ def _tab_results():
                         use_container_width=True)
 
 
+# ── Stats par question ─────────────────────────────────────────
+
+def _strip_html(text):
+    """Supprime les balises HTML pour l'affichage en texte brut (export)."""
+    import re
+    return re.sub(r'<[^>]+>', '', str(text or ""))
+
+
+def _tab_question_stats():
+    quizzes = get_all_quizzes()
+    opts = {0: "— Tous les quiz —"}
+    opts.update({q["id"]: f"{q['titre']} ({q['code']})" for q in quizzes})
+    sel = st.selectbox("Filtrer par quiz", list(opts.keys()), format_func=lambda x: opts[x],
+                       label_visibility="collapsed", key="qs_filter")
+    stats = get_question_stats(sel if sel else None)
+    if not stats:
+        st.info("Aucune donnée disponible. Les stats apparaissent après les premières soumissions.")
+        return
+
+    total_q = len(stats)
+    erreurs_hautes = sum(1 for s in stats if (s["taux_erreur"] or 0) >= 50)
+
+    kpi_grid([
+        ("❓", total_q,        "Questions analysées", "b"),
+        ("🚨", erreurs_hautes, "Questions difficiles (≥50% d'erreurs)", "o"),
+        ("📊", f"{sum(s['total_reponses'] or 0 for s in stats)}", "Réponses totales", "p"),
+        ("✅", f"{sum(s['bonnes_reponses'] or 0 for s in stats)}", "Bonnes réponses", "g"),
+    ])
+
+    slbl(f"Questions classées par taux d'erreur (du + difficile au + facile)")
+
+    for i, s in enumerate(stats):
+        taux = float(s["taux_erreur"] or 0)
+        total = int(s["total_reponses"] or 0)
+        bonnes = int(s["bonnes_reponses"] or 0)
+        mauvaises = int(s["mauvaises_reponses"] or 0)
+
+        if taux >= 50:   badge_cls = "qstat-num";     bar_col = "#DC2626"
+        elif taux >= 25: badge_cls = "qstat-num-mid"; bar_col = "#D97706"
+        else:            badge_cls = "qstat-num-ok";  bar_col = "#059669"
+
+        txt_clean = _strip_html(s["texte"])
+        preview = txt_clean[:90] + ("…" if len(txt_clean) > 90 else "")
+
+        st.markdown(f"""
+        <div class="qstat-card">
+          <div class="qstat-header">
+            <span class="qstat-num {badge_cls}">#{i+1} · {taux:.0f}% erreurs</span>
+            <span class="qstat-txt">{preview}</span>
+          </div>
+          <div class="qstat-bar-wrap">
+            <div class="qstat-bar-bg" style="flex:1">
+              <div class="qstat-bar-fill" style="width:{min(taux,100):.0f}%;background:{bar_col}"></div>
+            </div>
+            <span style="font-size:.8rem;font-weight:700;color:{bar_col};min-width:38px">{taux:.0f}%</span>
+          </div>
+          <div class="qstat-meta">
+            <span class="qstat-pill pill-tot">📊 {total} réponse(s)</span>
+            <span class="qstat-pill pill-ok">✅ {bonnes} correcte(s)</span>
+            <span class="qstat-pill pill-err">❌ {mauvaises} erreur(s)</span>
+            <span class="qstat-pill" style="background:#F1F5F9;color:#475569">📝 {s.get('quiz_titre','')}</span>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Export Excel ──
+    st.markdown("---")
+    slbl("Export")
+    import io as _io
+    df_export = pd.DataFrame([{
+        "Quiz":             s.get("quiz_titre", ""),
+        "Code":             s.get("quiz_code", ""),
+        "Question":         _strip_html(s["texte"]),
+        "Type":             s["type"],
+        "Points":           s["points"],
+        "Total réponses":   int(s["total_reponses"] or 0),
+        "Bonnes réponses":  int(s["bonnes_reponses"] or 0),
+        "Erreurs":          int(s["mauvaises_reponses"] or 0),
+        "Taux d'erreur (%)": float(s["taux_erreur"] or 0),
+    } for s in stats])
+
+    buf = _io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df_export.to_excel(writer, index=False, sheet_name="Stats questions")
+        ws = writer.sheets["Stats questions"]
+        # Mise en forme : largeur colonnes
+        for col in ws.columns:
+            ml = max((len(str(c.value)) for c in col if c.value), default=10)
+            ws.column_dimensions[col[0].column_letter].width = min(ml + 4, 60)
+        # Coloration conditionnelle de la colonne "Taux d'erreur"
+        from openpyxl.styles import PatternFill, Font
+        taux_col_idx = df_export.columns.get_loc("Taux d'erreur (%)") + 1
+        for row in ws.iter_rows(min_row=2, min_col=taux_col_idx, max_col=taux_col_idx):
+            for cell in row:
+                v = cell.value or 0
+                if v >= 50:   cell.fill = PatternFill("solid", fgColor="FEE2E2"); cell.font = Font(bold=True, color="991B1B")
+                elif v >= 25: cell.fill = PatternFill("solid", fgColor="FEF3C7"); cell.font = Font(color="92400E")
+                else:         cell.fill = PatternFill("solid", fgColor="D1FAE5"); cell.font = Font(color="065F46")
+    buf.seek(0)
+    st.download_button(
+        "📥  Télécharger les stats questions (Excel)",
+        data=buf.getvalue(),
+        file_name=f"stats_questions_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+
 # ══════════════════════════════════════════════════════════════
 #  ADMIN — Éditeur Quiz
 # ══════════════════════════════════════════════════════════════
@@ -979,9 +1156,10 @@ def render_admin_quiz_edit():
 
     slbl("Ajouter une question")
     q_type=st.selectbox("Type",list(_TYPES.keys()),format_func=lambda x:_TYPES[x],key="aqt",label_visibility="collapsed")
+    # ── Éditeur riche hors formulaire (les boutons JS ne marchent pas dans st.form) ──
+    slbl("Texte de la question")
+    rte_val = rich_text_editor("Question *", key="new_q_txt", default_value=st.session_state.get("_rte_new_q_txt",""))
     with st.form("faq",clear_on_submit=True):
-        st.markdown('<div style="background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:.78rem;color:#1E3A8A"><b>Formatage :</b> &nbsp;<code>**gras**</code> &nbsp;·&nbsp; <code>*italique*</code> &nbsp;·&nbsp; <code>[rouge]texte[/rouge]</code> &nbsp;·&nbsp; <code>[bleu]</code> &nbsp;·&nbsp; <code>[vert]</code> &nbsp;·&nbsp; <code>[orange]</code> &nbsp;·&nbsp; Entrée = saut de ligne</div>', unsafe_allow_html=True)
-        q_txt=st.text_area("Question *",height=100,placeholder="Ex: Quelle est la **définition** de [rouge]l'enquête MICS[/rouge] ?")
         q_pts=st.number_input("Points",min_value=0.5,max_value=20.0,value=1.0,step=0.5)
         opts_d=[]
         if q_type in("single","multiple"):
@@ -994,6 +1172,7 @@ def render_admin_quiz_edit():
         elif q_type=="numeric": c_num=st.number_input("Réponse correcte",value=0.0,format="%.4f")
         elif q_type=="text":    c_txt=st.text_input("Réponse(s)",placeholder="rep1 | rep2  (laisser vide = question ouverte)")
         if st.form_submit_button("➕  Ajouter la question",type="primary",use_container_width=True):
+            q_txt = (rte_val or "").strip()
             err=None
             if not q_txt.strip(): err="Texte obligatoire."
             elif q_type in("single","multiple"):
