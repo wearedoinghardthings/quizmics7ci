@@ -515,10 +515,10 @@ def render_agent_result():
         <div class="submitted-wrap">
           <div style="font-size:2.8rem;margin-bottom:10px">✅</div>
           <div style="font-size:1.15rem;font-weight:800;color:var(--blue-x)">Réponses enregistrées</div>
-          <div style="color:var(--text3);font-size:.9rem;margin-top:6px">{agent['nom']} {agent['prenom']} · {quiz['titre']}</div>
+          <div style="color:#94A3B8;font-size:.9rem;margin-top:6px">{agent['nom']} {agent['prenom']} · {quiz['titre']}</div>
         </div>""", unsafe_allow_html=True)
 
-    st.markdown(f'<p style="text-align:center;color:var(--text3);font-size:.82rem;margin:6px 0 16px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p style="text-align:center;color:#94A3B8;font-size:.82rem;margin:6px 0 16px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>', unsafe_allow_html=True)
     st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
     if st.button("🏠  Retour à l'accueil", key="r_home", use_container_width=True):
         for k in ("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score","current_agent"):
@@ -577,52 +577,75 @@ def _cached_stats():
 def _tab_overview():
     stats = _cached_stats()
     pad()
-    st.markdown(f"""
-    <div class="kpi-grid">
-      <div class="kpi kpi-b"><span class="kpi-ico">👥</span><p class="kpi-val">{stats['total_agents']}</p><p class="kpi-lbl">Agents total</p></div>
-      <div class="kpi kpi-g"><span class="kpi-ico">✅</span><p class="kpi-val">{stats['pub_agents']}</p><p class="kpi-lbl">Publiés</p></div>
-      <div class="kpi kpi-p"><span class="kpi-ico">📝</span><p class="kpi-val">{stats['active_quizzes']}</p><p class="kpi-lbl">Quiz actifs</p></div>
-      <div class="kpi kpi-o"><span class="kpi-ico">📊</span><p class="kpi-val">{stats['total_submissions']}</p><p class="kpi-lbl">Soumissions</p></div>
-    </div>""", unsafe_allow_html=True)
+    def _kpi(ico, val, lbl, bg, border, color):
+        return (f'<div style="background:{bg};border:1.5px solid {border};border-radius:14px;'
+                f'padding:20px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);">'
+                f'<span style="font-size:1.8rem">{ico}</span>'
+                f'<p style="font-size:2.2rem;font-weight:900;color:{color};margin:8px 0 0;letter-spacing:-1px;line-height:1">{val}</p>'
+                f'<p style="font-size:.68rem;font-weight:800;color:#94A3B8;margin:5px 0 0;text-transform:uppercase;letter-spacing:.1em">{lbl}</p>'
+                f'</div>')
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:0 16px;margin-bottom:20px">'
+        f'{_kpi("👥", stats["total_agents"],     "Agents total",  "linear-gradient(135deg,#EFF6FF,#DBEAFE)", "#BFDBFE", "#2563EB")}'
+        f'{_kpi("✅", stats["pub_agents"],       "Publiés",       "linear-gradient(135deg,#ECFDF5,#D1FAE5)", "#6EE7B7", "#059669")}'
+        f'{_kpi("📝", stats["active_quizzes"],   "Quiz actifs",   "linear-gradient(135deg,#F5F3FF,#EDE9FE)", "#C4B5FD", "#7C3AED")}'
+        f'{_kpi("📊", stats["total_submissions"],"Soumissions",   "linear-gradient(135deg,#FFFBEB,#FEF3C7)", "#FCD34D", "#D97706")}'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     avg = stats["avg_score"]
     rate = min(100, round(stats["total_submissions"] / max(1, stats["pub_agents"]) * 100))
-    col_avg = "var(--green)" if avg >= 70 else ("var(--orange)" if avg >= 50 else "var(--red)")
-    st.markdown(f"""
-    <div class="stat-row">
-      <div class="stat-box">
-        <p class="stat-val" style="color:{col_avg}">{avg:.1f}%</p>
-        <p class="stat-lbl">Score moyen</p>
-      </div>
-      <div class="stat-box">
-        <p class="stat-val" style="color:var(--blue)">{rate}%</p>
-        <p class="stat-lbl">Taux complétion</p>
-      </div>
-    </div>""", unsafe_allow_html=True)
+    col_avg = "#059669" if avg >= 70 else ("#D97706" if avg >= 50 else "#DC2626")
+    _sbox = 'background:#fff;border:1.5px solid #E2E8F4;border-radius:14px;padding:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.07)'
+    _sval = 'font-size:2rem;font-weight:900;margin:0;letter-spacing:-1px'
+    _slbl = 'font-size:.7rem;font-weight:700;color:#94A3B8;margin:4px 0 0;text-transform:uppercase;letter-spacing:.08em'
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px;margin-bottom:12px">'
+        f'<div style="{_sbox}"><p style="{_sval};color:{col_avg}">{avg:.1f}%</p><p style="{_slbl}">Score moyen</p></div>'
+        f'<div style="{_sbox}"><p style="{_sval};color:#2563EB">{rate}%</p><p style="{_slbl}">Taux complétion</p></div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     if stats["per_quiz"]:
         section("Scores moyens par quiz")
         bars = ""
         for q in stats["per_quiz"]:
             p = min(100, q["avg_pct"] or 0)
-            c = "var(--green)" if p >= 70 else ("var(--orange)" if p >= 50 else "var(--red)")
-            bars += f'<div class="sb-row"><span class="sb-lbl" title="{q["titre"]}">{q["titre"][:22]}</span><div class="sb-bg"><div class="sb-fill" style="width:{p:.0f}%;background:{c}"></div></div><span class="sb-val" style="color:{c}">{p:.0f}%</span></div>'
-        st.markdown(f'<div class="score-bars">{bars}</div>', unsafe_allow_html=True)
+            c = "#059669" if p >= 70 else ("#D97706" if p >= 50 else "#DC2626")
+            bars += (f'<div style="display:flex;align-items:center;gap:10px;margin:8px 0">'
+                     f'<span style="font-size:.82rem;font-weight:600;color:#0F172A;min-width:100px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{q["titre"]}">{q["titre"][:22]}</span>'
+                     f'<div style="flex:1;background:#DBEAFE;border-radius:99px;height:10px;overflow:hidden">'
+                     f'<div style="width:{p:.0f}%;height:10px;border-radius:99px;background:{c}"></div></div>'
+                     f'<span style="font-size:.82rem;font-weight:800;min-width:36px;text-align:right;color:{c}">{p:.0f}%</span></div>')
+        st.markdown(f'<div style="padding:0 16px">{bars}</div>', unsafe_allow_html=True)
 
     if stats["recent"]:
         section("10 dernières soumissions")
         items = ""
         for r in stats["recent"]:
             p = (r["score"] / r["max_score"] * 100) if r["max_score"] > 0 else 0
-            c = "var(--green)" if p >= 70 else ("var(--orange)" if p >= 50 else "var(--red)")
+            c = "#059669" if p >= 70 else ("#D97706" if p >= 50 else "#DC2626")
             init = (r["nom"][0] + (r["prenom"][0] if r["prenom"] else "")).upper()
             try:
                 dt = datetime.fromisoformat(r["completed_at"])
                 diff = datetime.now() - dt
                 tstr = f"Il y a {diff.seconds//60} min" if diff.seconds < 3600 else (f"Il y a {diff.seconds//3600}h" if diff.days == 0 else dt.strftime("%d/%m %H:%M"))
             except: tstr = (r["completed_at"] or "")[:16]
-            items += f'<div class="act-item"><div class="act-av">{init}</div><div><div class="act-name">{r["nom"]} {r["prenom"]}</div><div class="act-quiz">{r["titre"]}</div></div><div class="act-right"><div class="act-pct" style="color:{c}">{p:.0f}%</div><div class="act-time">{tstr}</div></div></div>'
-        st.markdown(f'<div class="activity" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:4px 16px;margin:0 16px;box-shadow:var(--shadow)">{items}</div>', unsafe_allow_html=True)
+            items += (
+                f'<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid #E2E8F4">'
+                f'<div style="width:38px;height:38px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,#BFDBFE,#EFF6FF);color:#1D4ED8;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center">{init}</div>'
+                f'<div><div style="font-weight:700;font-size:14px;color:#0F172A">{r["nom"]} {r["prenom"]}</div>'
+                f'<div style="font-size:.77rem;color:#94A3B8;margin-top:1px">{r["titre"]}</div></div>'
+                f'<div style="margin-left:auto;text-align:right;flex-shrink:0">'
+                f'<div style="font-size:1rem;font-weight:900;color:{c}">{p:.0f}%</div>'
+                f'<div style="font-size:.7rem;color:#94A3B8">{tstr}</div></div></div>'
+            )
+        st.markdown(
+            f'<div style="background:#fff;border:1.5px solid #E2E8F4;border-radius:14px;padding:4px 16px;margin:0 16px;box-shadow:0 1px 3px rgba(0,0,0,.07)">{items}</div>',
+            unsafe_allow_html=True
+        )
     else:
         st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
         st.info("Aucune soumission pour l'instant.")
@@ -693,7 +716,7 @@ def _tab_agents():
         ags = get_all_agents()
         if not ags: st.info("Aucun agent dans la base."); return
         nb = sum(1 for a in ags if a["published"])
-        st.markdown(f'<p style="padding:12px 16px 4px;color:var(--text3);font-size:.85rem"><b style="color:var(--text)">{len(ags)}</b> agent(s) &nbsp;·&nbsp;{bdg(f"{nb} publié(s)","g")} &nbsp;{bdg(f"{len(ags)-nb} brouillon(s)","o")}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p style="padding:12px 16px 4px;color:#94A3B8;font-size:.85rem"><b style="color:#0F172A">{len(ags)}</b> agent(s) &nbsp;·&nbsp;{bdg(f"{nb} publié(s)","g")} &nbsp;{bdg(f"{len(ags)-nb} brouillon(s)","o")}</p>', unsafe_allow_html=True)
         st.markdown('<div style="padding:0 16px">', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         with c1:
@@ -709,8 +732,14 @@ def _tab_agents():
         for a in shown:
             init = (a["nom"][0] + (a["prenom"][0] if a["prenom"] else "")).upper()
             pub_b = bdg("✓ Publié","g") if a["published"] else bdg("Brouillon","o")
-            mat_s = f' · <span style="color:var(--text3)">{a["matricule"]}</span>' if a["matricule"] else ""
-            st.markdown(f'<div class="ag-card"><div class="ag-top"><div class="ag-av">{init}</div><div><b>{a["nom"]} {a["prenom"]}</b>{mat_s}<br>{pub_b}</div></div>', unsafe_allow_html=True)
+            mat_s = f' · <span style="color:#94A3B8">{a["matricule"]}</span>' if a["matricule"] else ""
+            st.markdown(
+                f'<div style="background:#fff;border:1.5px solid #E2E8F4;border-radius:14px;padding:12px 14px;margin:6px 0;box-shadow:0 1px 3px rgba(0,0,0,.07)">' 
+                f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">' 
+                f'<div style="width:38px;height:38px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,#BFDBFE,#EFF6FF);color:#1D4ED8;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px">{init}</div>' 
+                f'<div><b style="color:#0F172A">{a["nom"]} {a["prenom"]}</b>{mat_s}<br>{pub_b}</div></div>',
+                unsafe_allow_html=True
+            )
             c1, c2 = st.columns([3,1])
             with c1:
                 if st.button("🔓 Dépublier" if a["published"] else "✅ Publier", key=f"p_{a['id']}", use_container_width=True):
@@ -863,21 +892,21 @@ def _tab_question_stats():
         color = "#DC2626" if pct >= 60 else ("#D97706" if pct >= 30 else "#059669")
         txt_short = s["texte"][:55] + ("…" if len(s["texte"]) > 55 else "")
         bars_html += f"""
-        <div style="background:var(--surface);border:1.5px solid var(--border);border-left:4px solid {color};
-                    border-radius:0 10px 10px 0;padding:12px 16px;margin:8px 0;box-shadow:var(--shadow)">
+        <div style="background:#fff;border:1.5px solid #E2E8F4;border-left:4px solid {color};
+                    border-radius:0 10px 10px 0;padding:12px 16px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.07)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
             <span style="font-size:.72rem;font-weight:800;background:{color}22;color:{color};padding:2px 9px;border-radius:99px">
               {pct}% d'erreurs
             </span>
-            <span style="font-size:.75rem;color:var(--text3)">
+            <span style="font-size:.75rem;color:#94A3B8">
               {s['correct']}/{s['total']} correct{('s' if s['correct']>1 else '')}
             </span>
           </div>
-          <p style="font-size:14px;font-weight:600;color:var(--text);margin:0 0 7px;line-height:1.4">{txt_short}</p>
+          <p style="font-size:14px;font-weight:600;color:#0F172A;margin:0 0 7px;line-height:1.4">{txt_short}</p>
           <div style="background:#F1F5F9;border-radius:99px;height:8px;overflow:hidden">
             <div style="width:{pct}%;height:8px;border-radius:99px;background:{color}"></div>
           </div>
-          <div style="display:flex;gap:12px;margin-top:6px;font-size:.75rem;color:var(--text3)">
+          <div style="display:flex;gap:12px;margin-top:6px;font-size:.75rem;color:#94A3B8">
             <span>✅ {s['correct']} bonne(s)</span>
             <span>❌ {s['erreurs']} erreur(s)</span>
             <span>📝 {s['total']} réponse(s)</span>
