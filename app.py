@@ -77,6 +77,12 @@ html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-f
 .qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
 .qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
 .qtxt{font-size:15px;font-weight:600;color:var(--txt);margin:0 0 10px;line-height:1.45}
+.qtxt b{font-weight:800}
+.qtxt span{color:inherit!important}
+.qtxt [style*="color:#DC2626"]{color:#DC2626!important}
+.qtxt [style*="color:#1D4ED8"]{color:#1D4ED8!important}
+.qtxt [style*="color:#059669"]{color:#059669!important}
+.qtxt [style*="color:#D97706"]{color:#D97706!important}
 /* ── Radio/Checkbox ── */
 .stRadio>div{gap:5px!important}
 .stRadio>div>label{background:var(--bg)!important;border:1.5px solid var(--bor)!important;border-radius:10px!important;padding:11px 14px!important;font-size:14.5px!important;font-weight:500!important;min-height:46px!important;cursor:pointer!important;transition:all .12s!important}
