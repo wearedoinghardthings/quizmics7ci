@@ -358,61 +358,105 @@ def slbl(t): st.markdown(f'<p class="slbl">{t}</p>',unsafe_allow_html=True)
 def badge(t,c="b"): return f'<span class="badge b{c}">{t}</span>'
 
 def rich_text_editor(label, key, default_value="", height=110):
-    """Éditeur de texte avec boutons de mise en forme (gras, couleur, saut de ligne)."""
+    """Éditeur de texte avec boutons de mise en forme — onmousedown preserve la sélection."""
     current = st.session_state.get(f"_rte_{key}", default_value)
     st.markdown(f'<div style="font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">{label}</div>', unsafe_allow_html=True)
-    st.markdown(f"""
-    <div class="rte-toolbar" id="tb_{key}">
-      <button onclick="rteFormat('{key}','bold')" title="Gras"><b>G</b></button>
-      <button onclick="rteFormat('{key}','color_red')"   style="color:#DC2626">● Rouge</button>
-      <button onclick="rteFormat('{key}','color_blue')"  style="color:#1D4ED8">● Bleu</button>
-      <button onclick="rteFormat('{key}','color_green')" style="color:#059669">● Vert</button>
-      <button onclick="rteFormat('{key}','color_orange')"style="color:#D97706">● Orange</button>
-      <button onclick="rteFormat('{key}','newline')" title="Nouvelle ligne">↵ Ligne</button>
-    </div>
-    <script>
-    function rteFormat(key, action) {{
-      var ta = document.getElementById('rte_' + key);
-      if (!ta) return;
-      var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, sel = v.substring(s,e);
-      var ins = '';
-      if (action === 'bold')         ins = '<b>' + (sel||'texte') + '</b>';
-      else if (action === 'color_red')    ins = '<span style="color:#DC2626">' + (sel||'texte') + '</span>';
-      else if (action === 'color_blue')   ins = '<span style="color:#1D4ED8">' + (sel||'texte') + '</span>';
-      else if (action === 'color_green')  ins = '<span style="color:#059669">' + (sel||'texte') + '</span>';
-      else if (action === 'color_orange') ins = '<span style="color:#D97706">' + (sel||'texte') + '</span>';
-      else if (action === 'newline')      ins = (sel||'') + '<br>';
-      ta.value = v.substring(0,s) + ins + v.substring(e);
-      ta.selectionStart = ta.selectionEnd = s + ins.length;
-      ta.dispatchEvent(new Event('input', {{bubbles:true}}));
-    }}
-    </script>
-    """, unsafe_allow_html=True)
-    # Streamlit text_area caché pour récupérer la valeur
+
+    # Le textarea Streamlit doit être rendu AVANT le JS qui lui ajoute l'id
     val = st.text_area(
         " ", value=current, key=f"_rte_{key}", height=height,
         label_visibility="collapsed",
-        placeholder="Saisissez votre question… Utilisez les boutons ci-dessus pour la mise en forme.",
-        help="Sélectionnez du texte puis cliquez sur un bouton de formatage. Les balises HTML <b>, <span style=...> et <br> sont supportées."
+        placeholder="Saisissez votre question… Sélectionnez du texte puis cliquez sur un bouton.",
+        help="Sélectionnez du texte, puis cliquez sur Gras / Couleur / Ligne. Les balises <b>, <span> et <br> s'affichent en HTML dans le quiz."
     )
-    st.markdown(f"""<script>
+
+    # Injection JS : onmousedown + preventDefault = le textarea garde focus ET sélection
+    st.markdown(f"""
+    <script>
     (function() {{
-      var ta = document.querySelector('[data-testid="stTextArea"] textarea[aria-label=" "]');
-      if (ta && !ta.id) {{
-        // Trouve le bon textarea par ordre d'apparition dans la page
-      }}
-      // Associer l'id au textarea correspondant à cette clé
-      var areas = document.querySelectorAll('.stTextArea textarea');
-      areas.forEach(function(a) {{
-        if (a.closest('[data-testid="column"]') || true) {{
-          // heuristique : le dernier textarea sans id rte_ est le nôtre
-          if (!a.id || !a.id.startsWith('rte_')) {{
-            a.id = 'rte_{key}';
+      // Attacher l'id au bon textarea (dernier textarea sans rte_ id)
+      function attachId() {{
+        var areas = document.querySelectorAll('textarea');
+        for (var i = areas.length - 1; i >= 0; i--) {{
+          if (!areas[i].id || !areas[i].id.startsWith('rte_')) {{
+            areas[i].id = 'rte_{key}';
+            break;
           }}
         }}
-      }});
+      }}
+      attachId();
+
+      function applyFormat(action) {{
+        var ta = document.getElementById('rte_{key}');
+        if (!ta) {{ attachId(); ta = document.getElementById('rte_{key}'); }}
+        if (!ta) return;
+        var s = ta.selectionStart, e = ta.selectionEnd;
+        var v = ta.value, sel = v.substring(s, e);
+        var ins = '';
+        if      (action === 'bold')         ins = '<b>'  + (sel || 'texte') + '</b>';
+        else if (action === 'red')          ins = '<span style="color:#DC2626">' + (sel || 'texte') + '</span>';
+        else if (action === 'blue')         ins = '<span style="color:#1D4ED8">' + (sel || 'texte') + '</span>';
+        else if (action === 'green')        ins = '<span style="color:#059669">' + (sel || 'texte') + '</span>';
+        else if (action === 'orange')       ins = '<span style="color:#D97706">' + (sel || 'texte') + '</span>';
+        else if (action === 'br')           ins = (sel || '') + '<br>';
+        var newVal = v.substring(0, s) + ins + v.substring(e);
+        // Modifier via le setter natif pour que React/Streamlit détecte le changement
+        var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+        nativeInput.set.call(ta, newVal);
+        ta.dispatchEvent(new Event('input', {{bubbles: true}}));
+        ta.dispatchEvent(new Event('change', {{bubbles: true}}));
+        // Repositionner le curseur après l'insertion
+        var newPos = s + ins.length;
+        ta.setSelectionRange(newPos, newPos);
+        ta.focus();
+      }}
+
+      // Créer la toolbar dynamiquement et l'insérer AVANT le textarea
+      function buildToolbar() {{
+        if (document.getElementById('tb_{key}')) return;
+        var ta = document.getElementById('rte_{key}');
+        if (!ta) return;
+        var container = ta.closest('.stTextArea') || ta.parentElement;
+
+        var tb = document.createElement('div');
+        tb.id = 'tb_{key}';
+        tb.className = 'rte-toolbar';
+
+        var btns = [
+          ['bold',   '<b>G</b>',       '',                   'Gras'],
+          ['red',    '● Rouge',        'color:#DC2626',       'Texte rouge'],
+          ['blue',   '● Bleu',         'color:#1D4ED8',       'Texte bleu'],
+          ['green',  '● Vert',         'color:#059669',       'Texte vert'],
+          ['orange', '● Orange',       'color:#D97706',       'Texte orange'],
+          ['br',     '↵ Ligne',        '',                   'Saut de ligne'],
+        ];
+        btns.forEach(function(b) {{
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.innerHTML = b[1];
+          btn.title = b[3];
+          if (b[2]) btn.style.cssText = b[2];
+          // onmousedown + preventDefault : empêche le textarea de perdre le focus/sélection
+          btn.addEventListener('mousedown', function(ev) {{
+            ev.preventDefault();  // ← clé du fix
+          }});
+          btn.addEventListener('click', function(ev) {{
+            ev.preventDefault();
+            applyFormat(b[0]);
+          }});
+          tb.appendChild(btn);
+        }});
+
+        container.insertBefore(tb, container.firstChild);
+      }}
+
+      // Construire immédiatement et réessayer si le DOM n'est pas prêt
+      buildToolbar();
+      setTimeout(buildToolbar, 300);
+      setTimeout(buildToolbar, 800);
     }})();
-    </script>""", unsafe_allow_html=True)
+    </script>
+    """, unsafe_allow_html=True)
     return val
 
 def kpi_grid(items):
