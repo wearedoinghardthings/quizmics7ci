@@ -407,20 +407,21 @@ def get_question_stats(quiz_id=None):
             qz.titre AS quiz_titre,
             qz.code  AS quiz_code,
             COUNT(a.id)              AS total_reponses,
-            SUM(a.is_correct)        AS bonnes_reponses,
-            COUNT(a.id) - SUM(a.is_correct) AS mauvaises_reponses,
+            SUM(COALESCE(a.is_correct,0))        AS bonnes_reponses,
+            COUNT(a.id) - SUM(COALESCE(a.is_correct,0)) AS mauvaises_reponses,
             CASE WHEN COUNT(a.id)>0
-                 THEN ROUND((COUNT(a.id)-SUM(a.is_correct))*100.0/COUNT(a.id),1)
+                 THEN ROUND((COUNT(a.id)-SUM(COALESCE(a.is_correct,0)))*100.0/COUNT(a.id),1)
                  ELSE 0 END          AS taux_erreur
         FROM questions q
         JOIN quizzes qz ON q.quiz_id=qz.id
         LEFT JOIN answers a ON a.question_id=q.id
         LEFT JOIN sessions s ON a.session_id=s.id AND s.completed=1
     """
+    group = " GROUP BY q.id, q.texte, q.type, q.points, q.quiz_id, qz.titre, qz.code ORDER BY taux_erreur DESC, total_reponses DESC"
     if quiz_id:
-        rows = _fetchall(base + " WHERE q.quiz_id=? GROUP BY q.id ORDER BY taux_erreur DESC, total_reponses DESC", (quiz_id,))
+        rows = _fetchall(base + " WHERE q.quiz_id=?" + group, (quiz_id,))
     else:
-        rows = _fetchall(base + " GROUP BY q.id ORDER BY taux_erreur DESC, total_reponses DESC")
+        rows = _fetchall(base + group)
     return rows
 
 
