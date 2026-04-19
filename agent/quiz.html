@@ -252,6 +252,20 @@ async function init() {
   }
 }
 
+
+// ── Formatage texte riche ──
+function fmt(text) {
+  let t = String(text || "");
+  t = t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  t = t.replace(/\*([^*]+?)\*/g,    "<i>$1</i>");
+  t = t.replace(/\[rouge\](.+?)\[\/rouge\]/g,   '<span style="color:#DC2626;font-weight:700">$1</span>');
+  t = t.replace(/\[bleu\](.+?)\[\/bleu\]/g,     '<span style="color:#2563EB;font-weight:700">$1</span>');
+  t = t.replace(/\[vert\](.+?)\[\/vert\]/g,     '<span style="color:#059669;font-weight:700">$1</span>');
+  t = t.replace(/\[orange\](.+?)\[\/orange\]/g, '<span style="color:#D97706;font-weight:700">$1</span>');
+  t = t.replace(/\n/g, "<br>");
+  return t;
+}
+
 // ── Rendu questions ──
 function renderQuestions() {
   document.getElementById("quiz-title-prog").textContent = quiz.titre;
@@ -294,7 +308,7 @@ function renderQuestions() {
         <span class="q-type">${ICONS[q.type]} ${HINTS[q.type]}</span>
         <span class="q-pts">${pts}</span>
       </div>
-      <p class="qtext">${q.texte}</p>
+      <p class="qtext">${fmt(q.texte)}</p>
       ${inputHtml}
     </div>`;
   }).join("");
