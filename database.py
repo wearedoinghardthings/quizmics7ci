@@ -395,6 +395,35 @@ def session_already_completed(agent_id, quiz_id):
         "SELECT id FROM sessions WHERE agent_id=? AND quiz_id=? AND completed=1",
         (agent_id, quiz_id)) is not None
 
+def get_question_stats(quiz_id=None):
+    """Retourne les stats par question : nb de réponses, nb de bonnes réponses, taux d'erreur."""
+    base = """
+        SELECT
+            q.id AS question_id,
+            q.texte,
+            q.type,
+            q.points,
+            q.quiz_id,
+            qz.titre AS quiz_titre,
+            qz.code  AS quiz_code,
+            COUNT(a.id)              AS total_reponses,
+            SUM(a.is_correct)        AS bonnes_reponses,
+            COUNT(a.id) - SUM(a.is_correct) AS mauvaises_reponses,
+            CASE WHEN COUNT(a.id)>0
+                 THEN ROUND((COUNT(a.id)-SUM(a.is_correct))*100.0/COUNT(a.id),1)
+                 ELSE 0 END          AS taux_erreur
+        FROM questions q
+        JOIN quizzes qz ON q.quiz_id=qz.id
+        LEFT JOIN answers a ON a.question_id=q.id
+        LEFT JOIN sessions s ON a.session_id=s.id AND s.completed=1
+    """
+    if quiz_id:
+        rows = _fetchall(base + " WHERE q.quiz_id=? GROUP BY q.id ORDER BY taux_erreur DESC, total_reponses DESC", (quiz_id,))
+    else:
+        rows = _fetchall(base + " GROUP BY q.id ORDER BY taux_erreur DESC, total_reponses DESC")
+    return rows
+
+
 def get_stats():
     def _n(sql, p=None): r=_fetchone(sql,p); return list(_row(r).values())[0] if r else 0
     total_agents     = _n("SELECT COUNT(*) FROM agents")
@@ -413,20 +442,3 @@ def get_stats():
     return {"total_agents":total_agents,"pub_agents":pub_agents,
             "active_quizzes":active_quizzes,"total_submissions":total_submissions,
             "avg_score":avg_score,"per_quiz":per_quiz,"recent":recent}
-
-
-def get_question_stats(quiz_id):
-    """Pour chaque question : nb réponses, correctes, erreurs, taux d erreur."""
-    questions = get_questions(quiz_id)
-    out = []
-    for i, q in enumerate(questions):
-        tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
-        cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
-        t = int(list(tot.values())[0]) if tot else 0
-        c = int(list(cor.values())[0]) if cor else 0
-        e = t - c
-        out.append({"num":i+1,"question_id":q["id"],"texte":q["texte"],"type":q["type"],
-                    "points":q["points"],"total":t,"correct":c,"erreurs":e,
-                    "taux_erreur":round((e/t*100) if t>0 else 0, 1)})
-    out.sort(key=lambda x: x["taux_erreur"], reverse=True)
-    return out
