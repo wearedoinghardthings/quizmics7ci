@@ -2,7 +2,7 @@
 database.py — QuizAgent CI
 Backend PostgreSQL (Supabase) avec fallback SQLite pour dev local.
 """
-import os, json, random
+import os, json, random, time
 from datetime import datetime
 
 # ── Détection du backend ──────────────────────────────────────────────────────
@@ -24,27 +24,56 @@ if USE_PG:
     import psycopg2.pool
     _pool = None
 
+    def _safe_url():
+        from urllib.parse import urlparse, quote, urlunparse
+        p = urlparse(DATABASE_URL)
+        if p.password:
+            safe_pass = quote(p.password, safe="")
+            safe_user = quote(p.username, safe="")
+            host_part = p.hostname
+            if p.port: host_part += f":{p.port}"
+            return urlunparse(p._replace(netloc=f"{safe_user}:{safe_pass}@{host_part}"))
+        return DATABASE_URL
+
     def _get_pool():
         global _pool
         if _pool is None:
-            from urllib.parse import urlparse, quote, urlunparse
-            p = urlparse(DATABASE_URL)
-            if p.password:
-                safe_pass = quote(p.password, safe="")
-                safe_user = quote(p.username, safe="")
-                host_part = p.hostname
-                if p.port: host_part += f":{p.port}"
-                safe_url = urlunparse(p._replace(netloc=f"{safe_user}:{safe_pass}@{host_part}"))
+            url = _safe_url()
+            # Transaction pooler Supabase (port 6543) = pas de keepalive
+            # Session pooler / direct (port 5432) = keepalive OK
+            from urllib.parse import urlparse as _up
+            port = _up(url).port or 5432
+            if port == 6543:
+                # Transaction pooler — connexions courtes, pas de prepared statements
+                _pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 10, url,
+                    connect_timeout=10,
+                    options="-c statement_timeout=30000",
+                )
             else:
-                safe_url = DATABASE_URL
-            _pool = psycopg2.pool.SimpleConnectionPool(2, 20, safe_url)
+                # Session pooler ou direct — connexions persistantes
+                _pool = psycopg2.pool.SimpleConnectionPool(
+                    2, 20, url,
+                    connect_timeout=10,
+                    keepalives=1, keepalives_idle=30,
+                    keepalives_interval=5, keepalives_count=3,
+                )
         return _pool
 
     def get_conn():
-        return _get_pool().getconn()
+        try:
+            return _get_pool().getconn()
+        except Exception:
+            # Pool épuisé → connexion directe de secours
+            from urllib.parse import urlparse as _up
+            return psycopg2.connect(_safe_url(), connect_timeout=10)
 
     def release(conn):
-        _get_pool().putconn(conn)
+        try:
+            _get_pool().putconn(conn)
+        except Exception:
+            try: conn.close()
+            except Exception: pass
 
     # Adaptateur : rend les résultats accessibles comme des dicts
     class _Cur:
@@ -218,34 +247,58 @@ def _safe_alter(table, col, definition):
 
 # ── Helpers internes ──────────────────────────────────────────────────────────
 
+def _with_retry(fn, retries=3):
+    """Exécute fn avec retry en cas d'erreur de connexion."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            err_str = str(e).lower()
+            # Retry seulement sur erreurs de connexion
+            if any(x in err_str for x in ["connection", "closed", "pool", "timeout", "ssl"]):
+                global _pool
+                _pool = None  # Reset pool
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            raise
+    raise last_err
+
 def _fetchall(sql, params=None):
-    conn = get_conn()
-    try:
-        c = _cursor(conn)
-        c.execute(sql, params or ())
-        return [_row(r) for r in c.fetchall()]
-    finally:
-        release(conn)
+    def _fn():
+        conn = get_conn()
+        try:
+            c = _cursor(conn)
+            c.execute(sql, params or ())
+            return [_row(r) for r in c.fetchall()]
+        finally:
+            release(conn)
+    return _with_retry(_fn)
 
 def _fetchone(sql, params=None):
-    conn = get_conn()
-    try:
-        c = _cursor(conn)
-        c.execute(sql, params or ())
-        return _row(c.fetchone())
-    finally:
-        release(conn)
+    def _fn():
+        conn = get_conn()
+        try:
+            c = _cursor(conn)
+            c.execute(sql, params or ())
+            return _row(c.fetchone())
+        finally:
+            release(conn)
+    return _with_retry(_fn)
 
 def _execute(sql, params=None):
     """Exécute et retourne le lastrowid."""
-    conn = get_conn()
-    try:
-        cur = _cursor(conn)
-        with cur:
-            cur.execute(sql, params or ())
-        return cur.lastrowid
-    finally:
-        release(conn)
+    def _fn():
+        conn = get_conn()
+        try:
+            cur = _cursor(conn)
+            with cur:
+                cur.execute(sql, params or ())
+            return cur.lastrowid
+        finally:
+            release(conn)
+    return _with_retry(_fn)
 
 
 # ── AGENTS ────────────────────────────────────────────────────────────────────
@@ -261,6 +314,9 @@ def get_all_agents():
 
 def get_agent_by_id(aid):
     return _fetchone("SELECT * FROM agents WHERE id=?", (aid,))
+
+def get_session_by_id(sid):
+    return _fetchone("SELECT * FROM sessions WHERE id=?", (sid,))
 
 def upsert_agents(df):
     n = 0
@@ -413,3 +469,37 @@ def get_stats():
     return {"total_agents":total_agents,"pub_agents":pub_agents,
             "active_quizzes":active_quizzes,"total_submissions":total_submissions,
             "avg_score":avg_score,"per_quiz":per_quiz,"recent":recent}
+
+
+def get_question_stats(quiz_id):
+    """
+    Pour chaque question d'un quiz :
+    - nombre de fois répondue
+    - nombre de bonnes réponses
+    - taux d'erreur
+    """
+    questions = get_questions(quiz_id)
+    results = []
+    for i, q in enumerate(questions):
+        total = _fetchone(
+            "SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
+        correct = _fetchone(
+            "SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
+        total_n   = int(list(total.values())[0])   if total   else 0
+        correct_n = int(list(correct.values())[0]) if correct else 0
+        error_n   = total_n - correct_n
+        error_pct = round((error_n / total_n * 100) if total_n > 0 else 0, 1)
+        results.append({
+            "num":        i + 1,
+            "question_id": q["id"],
+            "texte":      q["texte"],
+            "type":       q["type"],
+            "points":     q["points"],
+            "total":      total_n,
+            "correct":    correct_n,
+            "erreurs":    error_n,
+            "taux_erreur": error_pct,
+        })
+    # Trier par taux d'erreur décroissant
+    results.sort(key=lambda x: x["taux_erreur"], reverse=True)
+    return results
