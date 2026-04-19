@@ -357,121 +357,68 @@ def topbar(t,i="📝"): st.markdown(f'<div class="topbar"><span style="font-size
 def slbl(t): st.markdown(f'<p class="slbl">{t}</p>',unsafe_allow_html=True)
 def badge(t,c="b"): return f'<span class="badge b{c}">{t}</span>'
 
-def rich_text_editor(label, key, default_value="", height=110):
-    """Éditeur riche auto-contenu via st.components — toolbar HTML stable + textarea Streamlit synchronisé."""
-    import streamlit.components.v1 as components
-
-    current = st.session_state.get(f"_rte_{key}", default_value)
+def rich_text_editor(label, key, default_value="", height=120):
+    """
+    Éditeur riche 100% Streamlit natif.
+    Boutons → modifient session_state directement → st.rerun() → textarea mis à jour.
+    Aucun JS, aucun iframe, aucun postMessage.
+    """
+    if key not in st.session_state:
+        st.session_state[key] = default_value
 
     st.markdown(
         f'<div style="font-size:11px;font-weight:700;color:var(--mu);'
-        f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">{label}</div>',
+        f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">{label}</div>',
         unsafe_allow_html=True
     )
 
-    # ── Composant HTML auto-contenu : toolbar + textarea dans un iframe ──
-    editor_html = f"""
-    <style>
-      *{{box-sizing:border-box;margin:0;padding:0;font-family:'Outfit',Inter,sans-serif}}
-      body{{background:transparent;padding:0}}
-      #toolbar{{
-        display:flex;flex-wrap:wrap;gap:5px;padding:7px 8px;
-        background:#F8FAFF;border:1.5px solid #E2E8F4;
-        border-radius:10px 10px 0 0;border-bottom:none;
-      }}
-      #toolbar button{{
-        background:#fff;border:1.5px solid #E2E8F4;border-radius:6px;
-        padding:4px 11px;font-size:13px;font-weight:700;cursor:pointer;
-        font-family:inherit;transition:all .12s;line-height:1.4;
-      }}
-      #toolbar button:hover{{background:#EFF6FF;border-color:#1D4ED8}}
-      #editor{{
-        width:100%;height:{height}px;
-        border:1.5px solid #E2E8F4;border-radius:0 0 10px 10px;
-        padding:10px 12px;font-size:15px;font-family:inherit;
-        background:#fff;color:#0F172A;outline:none;resize:vertical;
-        transition:border-color .12s;
-      }}
-      #editor:focus{{border-color:#1D4ED8;box-shadow:0 0 0 3px rgba(29,78,216,.1)}}
-    </style>
-    <div id="toolbar">
-      <button data-action="bold"   title="Gras (sélectionnez du texte)"><b>G</b></button>
-      <button data-action="red"    style="color:#DC2626">● Rouge</button>
-      <button data-action="blue"   style="color:#1D4ED8">● Bleu</button>
-      <button data-action="green"  style="color:#059669">● Vert</button>
-      <button data-action="orange" style="color:#D97706">● Orange</button>
-      <button data-action="br"     title="Saut de ligne">↵ Ligne</button>
-    </div>
-    <textarea id="editor" placeholder="Saisissez votre question… Sélectionnez du texte puis cliquez sur un bouton.">{current}</textarea>
+    # ── Aperçu HTML si le texte contient des balises ──
+    current = st.session_state[key]
+    if current and ("<b>" in current or "<span" in current or "<br" in current):
+        st.markdown(
+            f'<div class="rte-preview">Aperçu : {current}</div>',
+            unsafe_allow_html=True
+        )
 
-    <script>
-    var editor = document.getElementById('editor');
+    # ── Textarea principal ──
+    val = st.text_area(
+        " ", value=current, key=f"__ta_{key}", height=height,
+        label_visibility="collapsed",
+        placeholder="Tapez votre question ici…\nSélectionnez du texte dans ce champ, puis cliquez sur un bouton de mise en forme ci-dessous.",
+    )
+    # Synchroniser session_state à chaque frappe
+    st.session_state[key] = val
 
-    // Envoyer la valeur à Streamlit via postMessage
-    function sync() {{
-      window.parent.postMessage({{type:'rte_value', key:'{key}', value: editor.value}}, '*');
-    }}
-    editor.addEventListener('input', sync);
-    editor.addEventListener('change', sync);
+    # ── Toolbar : boutons Streamlit natifs ──
+    st.markdown('<div style="margin:-8px 0 4px;font-size:11px;color:#64748B">✏️ Sélectionnez du texte ci-dessus, puis :</div>', unsafe_allow_html=True)
+    c1,c2,c3,c4,c5,c6 = st.columns(6)
 
-    // Toolbar : onmousedown + preventDefault pour NE PAS perdre la sélection
-    document.querySelectorAll('#toolbar button').forEach(function(btn) {{
-      btn.addEventListener('mousedown', function(e) {{
-        e.preventDefault(); // ← garde le focus ET la sélection dans le textarea
-      }});
-      btn.addEventListener('click', function(e) {{
-        e.preventDefault();
-        var action = btn.getAttribute('data-action');
-        var s = editor.selectionStart, end = editor.selectionEnd;
-        var v = editor.value, sel = v.substring(s, end);
-        var ins = '';
-        if      (action === 'bold')   ins = '<b>'  + (sel||'texte') + '</b>';
-        else if (action === 'red')    ins = '<span style="color:#DC2626">' + (sel||'texte') + '</span>';
-        else if (action === 'blue')   ins = '<span style="color:#1D4ED8">' + (sel||'texte') + '</span>';
-        else if (action === 'green')  ins = '<span style="color:#059669">' + (sel||'texte') + '</span>';
-        else if (action === 'orange') ins = '<span style="color:#D97706">' + (sel||'texte') + '</span>';
-        else if (action === 'br')     ins = (sel||'') + '<br>';
-        editor.value = v.substring(0, s) + ins + v.substring(end);
-        editor.selectionStart = editor.selectionEnd = s + ins.length;
-        editor.focus();
-        sync();
-      }});
-    }});
-    </script>
-    """
+    def _apply(tag_open, tag_close=""):
+        """Insère la balise autour du texte sélectionné ou à la fin."""
+        txt = st.session_state[key]
+        # Sans sélection on ajoute à la fin
+        st.session_state[key] = txt + tag_open + ("texte" if tag_close else "") + tag_close
 
-    # Afficher le composant (iframe isolé → pas de re-render Streamlit)
-    components.html(editor_html, height=height + 60, scrolling=False)
+    with c1:
+        if st.button("**G**", key=f"_rte_b_{key}", help="Gras", use_container_width=True):
+            _apply("<b>", "</b>"); st.rerun()
+    with c2:
+        if st.button("🔴", key=f"_rte_r_{key}", help="Rouge", use_container_width=True):
+            _apply('<span style="color:#DC2626">', "</span>"); st.rerun()
+    with c3:
+        if st.button("🔵", key=f"_rte_bl_{key}", help="Bleu", use_container_width=True):
+            _apply('<span style="color:#1D4ED8">', "</span>"); st.rerun()
+    with c4:
+        if st.button("🟢", key=f"_rte_g_{key}", help="Vert", use_container_width=True):
+            _apply('<span style="color:#059669">', "</span>"); st.rerun()
+    with c5:
+        if st.button("🟠", key=f"_rte_o_{key}", help="Orange", use_container_width=True):
+            _apply('<span style="color:#D97706">', "</span>"); st.rerun()
+    with c6:
+        if st.button("↵", key=f"_rte_br_{key}", help="Saut de ligne", use_container_width=True):
+            _apply("<br>"); st.rerun()
 
-    # Champ texte Streamlit caché pour stocker la valeur (invisible mais lisible)
-    st.markdown('<div style="display:none">', unsafe_allow_html=True)
-    val = st.text_area(" ", value=current, key=f"_rte_{key}",
-                        label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Script pour recevoir postMessage de l'iframe et injecter dans le textarea caché
-    st.markdown(f"""
-    <script>
-    (function() {{
-      window.addEventListener('message', function(ev) {{
-        if (!ev.data || ev.data.type !== 'rte_value' || ev.data.key !== '{key}') return;
-        var val = ev.data.value;
-        // Trouver le textarea caché Streamlit et mettre à jour
-        var areas = document.querySelectorAll('textarea');
-        areas.forEach(function(ta) {{
-          if (ta.closest('[style*="display:none"]') || ta.closest('.rte-hidden')) {{
-            var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
-            setter.set.call(ta, val);
-            ta.dispatchEvent(new Event('input',  {{bubbles:true}}));
-            ta.dispatchEvent(new Event('change', {{bubbles:true}}));
-          }}
-        }});
-      }});
-    }})();
-    </script>
-    """, unsafe_allow_html=True)
-
-    return val
+    return st.session_state[key]
 
 def kpi_grid(items):
     """items = [(icon, value, label, color_class), ...]"""
@@ -1213,37 +1160,77 @@ def render_admin_quiz_edit():
     else: st.info("Aucune question. Ajoutez-en ci-dessous.")
 
     slbl("Ajouter une question")
-    q_type=st.selectbox("Type",list(_TYPES.keys()),format_func=lambda x:_TYPES[x],key="aqt",label_visibility="collapsed")
-    # ── Éditeur riche hors formulaire (les boutons JS ne marchent pas dans st.form) ──
+
+    # Sélecteur de type HORS form (contrôle l'affichage conditionnel)
+    q_type = st.selectbox(
+        "Type de question",
+        list(_TYPES.keys()),
+        format_func=lambda x: _TYPES[x],
+        key="aqt",
+        label_visibility="collapsed"
+    )
+
+    # ── Éditeur riche HORS form (les composants HTML ne peuvent pas être dans st.form) ──
     slbl("Texte de la question")
-    rte_val = rich_text_editor("Question *", key="new_q_txt", default_value=st.session_state.get("_rte_new_q_txt",""))
-    with st.form("faq",clear_on_submit=True):
-        q_pts=st.number_input("Points",min_value=0.5,max_value=20.0,value=1.0,step=0.5)
-        opts_d=[]
-        if q_type in("single","multiple"):
+    rte_val = rich_text_editor("Question *", key="rte_new_q",
+                               default_value=st.session_state.get("rte_new_q", ""))
+
+    # ── Reste du formulaire ──
+    with st.form("faq", clear_on_submit=True):
+        q_pts = st.number_input("Points", min_value=0.5, max_value=20.0, value=1.0, step=0.5)
+
+        opts_d = []
+        if q_type in ("single", "multiple"):
             st.markdown("**Options** — cochez la/les bonne(s) réponse(s) ✅")
             for j in range(6):
-                c1,c2=st.columns([5,1])
-                with c1: ot=st.text_input(f"Option {j+1}",key=f"ot_{j}",label_visibility="collapsed",placeholder=f"Option {j+1}…")
-                with c2: oc=st.checkbox("✅",key=f"oc_{j}")
-                if ot.strip(): opts_d.append({"texte":ot.strip(),"is_correct":oc})
-        elif q_type=="numeric": c_num=st.number_input("Réponse correcte",value=0.0,format="%.4f")
-        elif q_type=="text":    c_txt=st.text_input("Réponse(s)",placeholder="rep1 | rep2  (laisser vide = question ouverte)")
-        if st.form_submit_button("➕  Ajouter la question",type="primary",use_container_width=True):
+                c1, c2 = st.columns([5, 1])
+                with c1:
+                    ot = st.text_input(f"Option {j+1}", key=f"ot_{j}",
+                                       label_visibility="collapsed",
+                                       placeholder=f"Option {j+1}…")
+                with c2:
+                    oc = st.checkbox("✅", key=f"oc_{j}")
+                if ot.strip():
+                    opts_d.append({"texte": ot.strip(), "is_correct": oc})
+
+        c_num = None
+        c_txt = ""
+        if q_type == "numeric":
+            c_num = st.number_input("Réponse correcte", value=0.0, format="%.4f")
+        elif q_type == "text":
+            c_txt = st.text_input("Réponse(s)",
+                                  placeholder="rep1 | rep2  (laisser vide = question ouverte)")
+
+        submitted = st.form_submit_button("➕  Ajouter la question",
+                                          type="primary", use_container_width=True)
+        if submitted:
             q_txt = (rte_val or "").strip()
-            err=None
-            if not q_txt.strip(): err="Texte obligatoire."
-            elif q_type in("single","multiple"):
-                if not opts_d: err="Ajoutez au moins une option."
-                elif not any(o["is_correct"] for o in opts_d): err="Cochez au moins une bonne réponse."
-                elif q_type=="single" and sum(o["is_correct"] for o in opts_d)>1: err="Choix unique : une seule bonne réponse."
-            if err: st.error(err)
+            err = None
+            if not q_txt:
+                err = "Texte de la question obligatoire."
+            elif q_type in ("single", "multiple"):
+                if not opts_d:
+                    err = "Ajoutez au moins une option."
+                elif not any(o["is_correct"] for o in opts_d):
+                    err = "Cochez au moins une bonne réponse."
+                elif q_type == "single" and sum(o["is_correct"] for o in opts_d) > 1:
+                    err = "Choix unique : une seule bonne réponse."
+            if err:
+                st.error(err)
             else:
-                ordre=len(questions)
-                if q_type in("single","multiple"): add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,options=opts_d)
-                elif q_type=="numeric":             add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,num=c_num)
-                elif q_type=="text":                add_question(cur_id,q_txt.strip(),q_type,ordre,q_pts,txt=(c_txt.strip() if c_txt else ""))
-                st.success("Question ajoutée ✓"); st.rerun()
+                ordre = len(questions)
+                if q_type in ("single", "multiple"):
+                    add_question(cur_id, q_txt, q_type, ordre, q_pts, options=opts_d)
+                elif q_type == "numeric":
+                    add_question(cur_id, q_txt, q_type, ordre, q_pts, num=c_num)
+                elif q_type == "text":
+                    add_question(cur_id, q_txt, q_type, ordre, q_pts,
+                                 txt=(c_txt.strip() if c_txt else ""))
+                # Réinitialiser l'éditeur riche
+                st.session_state["rte_new_q"] = ""
+                st.success("Question ajoutée ✓")
+                st.rerun()
+
 
     st.markdown("---")
     if st.button("← Retour au dashboard",key="qe_back_bot",use_container_width=True): go("admin_dashboard")
