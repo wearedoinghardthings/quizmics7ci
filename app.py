@@ -19,18 +19,6 @@ from database import (
     get_question_stats,
 )
 
-import re as _re
-
-def _fmt(t):
-    """Formate le texte : **gras**, *italique*, [rouge/bleu/vert/orange]texte[/couleur], \\n=saut de ligne"""
-    t = str(t)
-    t = _re.sub(r'[*][*](.+?)[*][*]', r'<b>\\1</b>', t)
-    t = _re.sub(r'[*]([^*]+?)[*]',    r'<i>\\1</i>', t)
-    for col, hex_ in [('rouge','#DC2626'),('bleu','#1D4ED8'),('vert','#059669'),('orange','#D97706')]:
-        t = _re.sub(rf'\\[{col}\\](.+?)\\[/{col}\\]', rf'<b style="color:{hex_}">\\1</b>', t)
-    t = t.replace('\\n', '<br>')
-    return t
-
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
                    layout="centered", initial_sidebar_state="collapsed")
 
@@ -88,7 +76,7 @@ html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-f
 .qmeta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
 .qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
-.qtxt{font-size:15px;font-weight:400;color:var(--txt);margin:0 0 10px;line-height:1.5}
+.qtxt{font-size:15px;font-weight:400;color:var(--txt);margin:0 0 10px;line-height:1.55;white-space:pre-line}
 .qtxt b{font-weight:800}
 .qtxt [style*="color:#DC2626"]{color:#DC2626!important}
 .qtxt [style*="color:#1D4ED8"]{color:#1D4ED8!important}
@@ -305,7 +293,7 @@ def _generate_quiz_pdf(quiz, questions):
             <span class="q-type">{ICONS[q["type"]]} {TYPE_LABELS[q["type"]]}</span>
             <span class="q-pts">{pts}</span>
           </div>
-          <div class="q-text">{_fmt(q["texte"])}</div>"""
+          <div class="q-text">{q["texte"]}</div>"""
 
         if q["type"] in ("single", "multiple"):
             rows += '<div class="options">'
@@ -673,7 +661,7 @@ def render_agent_quiz():
             f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
             f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
             f'<span class="qpts">{pts}</span></div>'
-            f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
+            f'<p class="qtxt">{q["texte"]}</p></div>', unsafe_allow_html=True)
 
         if q["type"]=="single":
             opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
