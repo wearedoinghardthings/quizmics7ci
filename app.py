@@ -671,111 +671,81 @@ _restore()
 
 # ── PDF export ────────────────────────────────────────────────────────────────
 def _make_pdf(quiz, questions):
-    from fpdf import FPDF
+    """Génère un fichier HTML imprimable — ouvrir dans le navigateur puis Ctrl+P pour sauvegarder en PDF."""
+    TYPES = {"single":"Choix unique","multiple":"Choix multiple","numeric":"Valeur numérique","text":"Texte libre"}
+    total_pts = sum(q["points"] for q in questions)
+    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
 
-    TYPES = {"single": "Choix unique", "multiple": "Choix multiple",
-             "numeric": "Valeur numerique", "text": "Texte libre"}
-
-    class PDF(FPDF):
-        def header(self):
-            self.set_fill_color(30, 58, 138)
-            self.rect(0, 0, 210, 40, "F")
-            self.set_text_color(255, 255, 255)
-            self.set_font("Helvetica", "B", 18)
-            self.set_xy(12, 8)
-            self.cell(186, 9, quiz["titre"][:55], ln=True)
-            self.set_font("Helvetica", "", 10)
-            self.set_xy(12, 20)
-            total = sum(q["points"] for q in questions)
-            self.cell(186, 6, f"Code: {quiz['code']}   |   {quiz['duree_minutes']} min   |   {len(questions)} questions   |   {total:.0f} point(s)", ln=True)
-            if quiz.get("description"):
-                self.set_xy(12, 29)
-                self.set_font("Helvetica", "I", 9)
-                self.set_text_color(180, 210, 255)
-                self.cell(186, 6, quiz["description"][:80], ln=True)
-            self.set_text_color(0, 0, 0)
-            self.ln(14)
-
-        def footer(self):
-            self.set_y(-13)
-            self.set_font("Helvetica", "I", 8)
-            self.set_text_color(160, 160, 160)
-            self.cell(0, 8, f"QuizAgent CI  —  {datetime.now().strftime('%d/%m/%Y %H:%M')}  —  Page {self.page_no()}", align="C")
-
-    pdf = PDF()
-    pdf.set_auto_page_break(True, margin=16)
-    pdf.add_page()
-
+    rows = ""
     for i, q in enumerate(questions):
         pts = f"{q['points']:.0f} pt" + ("s" if q["points"] != 1 else "")
+        rows += f"""
+        <div class="qblock">
+          <div class="qhead">
+            <span class="qnum">Q{i+1}</span>
+            <span class="qtype">{TYPES.get(q["type"],"")}</span>
+            <span class="qpts">{pts}</span>
+          </div>
+          <div class="qtext">{q["texte"].replace(chr(10),"<br>")}</div>"""
 
-        # Header question
-        pdf.set_fill_color(239, 246, 255)
-        pdf.set_draw_color(191, 219, 254)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(29, 78, 216)
-        pdf.cell(20, 7, f"  Q{i+1}", fill=True, border="LTB")
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(90, 7, TYPES.get(q["type"], ""), border="TB")
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(0, 7, pts, align="R", border="RTB", ln=True)
-
-        # Barre bleue + texte
-        pdf.set_fill_color(37, 99, 235)
-        x0, y0 = pdf.get_x(), pdf.get_y()
-        pdf.rect(x0, y0, 3, 10, "F")
-        pdf.set_x(x0 + 5)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(15, 23, 42)
-        pdf.multi_cell(174, 6, q["texte"])
-        pdf.ln(3)
-
-        if q["type"] in ("single", "multiple"):
+        if q["type"] in ("single","multiple"):
+            rows += '<div class="opts">'
             for o in q["options"]:
-                if o["is_correct"]:
-                    pdf.set_fill_color(209, 250, 229)
-                    pdf.set_draw_color(5, 150, 105)
-                    pdf.set_text_color(6, 95, 70)
-                    txt, style = "  ✓  " + o["texte"], "B"
-                else:
-                    pdf.set_fill_color(249, 250, 251)
-                    pdf.set_draw_color(226, 232, 244)
-                    pdf.set_text_color(15, 23, 42)
-                    txt, style = "  ○  " + o["texte"], ""
-                pdf.set_x(16)
-                pdf.set_font("Helvetica", style, 10)
-                pdf.multi_cell(172, 7, txt, border=1, fill=True)
-                pdf.ln(1)
+                cls = "opt-ok" if o["is_correct"] else "opt-no"
+                ico = "✅" if o["is_correct"] else "◻"
+                rows += f'<div class="{cls}">{ico} {o["texte"]}</div>'
+            rows += '</div>'
         elif q["type"] == "numeric":
-            pdf.set_x(16)
-            pdf.set_fill_color(209, 250, 229)
-            pdf.set_text_color(6, 95, 70)
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(172, 8, f"  Reponse : {q.get('reponse_correcte_num')}", fill=True, border=1, ln=True)
+            rows += f'<div class="rep-box">Réponse : <b>{q["reponse_correcte_num"]}</b></div>'
         elif q["type"] == "text":
             raw = (q.get("reponse_correcte_txt") or "").strip()
-            pdf.set_x(16)
-            pdf.set_font("Helvetica", "B", 10)
-            if raw:
-                pdf.set_fill_color(209, 250, 229)
-                pdf.set_text_color(6, 95, 70)
-                pdf.multi_cell(172, 8, f"  Reponses : {raw}", fill=True, border=1)
-            else:
-                pdf.set_fill_color(241, 245, 249)
-                pdf.set_text_color(100, 116, 139)
-                pdf.cell(172, 8, "  Question ouverte", fill=True, border=1, ln=True)
+            rows += f'<div class="rep-box">{"Réponse(s) : <b>" + raw + "</b>" if raw else "<i>Question ouverte</i>"}</div>'
 
-        pdf.ln(7)
+        rows += "</div>"
 
-    buf = io.BytesIO()
-    pdf.output(buf)
-    return buf.getvalue()
+    html = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>Corrigé — {quiz["titre"]}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Inter',Arial,sans-serif;background:#fff;color:#0F172A;padding:28px;font-size:13px}}
+  @media print{{body{{padding:16px}}.no-print{{display:none}}}}
+  .header{{background:linear-gradient(135deg,#1E3A8A,#2563EB);color:#fff;padding:22px 24px;border-radius:10px;margin-bottom:22px}}
+  .header h1{{font-size:20px;font-weight:800;margin-bottom:5px}}
+  .meta{{font-size:11px;opacity:.8;display:flex;gap:18px;flex-wrap:wrap;margin-top:6px}}
+  .code{{background:rgba(255,255,255,.2);padding:2px 10px;border-radius:99px;font-weight:700}}
+  .qblock{{background:#F8FAFF;border:1.5px solid #E2E8F4;border-left:4px solid #2563EB;border-radius:0 8px 8px 0;padding:12px 14px;margin-bottom:12px;page-break-inside:avoid}}
+  .qhead{{display:flex;align-items:center;gap:7px;margin-bottom:8px}}
+  .qnum{{background:#2563EB;color:#fff;font-size:10px;font-weight:900;padding:2px 8px;border-radius:99px}}
+  .qtype{{color:#94A3B8;font-size:10px;font-weight:600}}
+  .qpts{{background:#F1F5F9;color:#64748B;font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}}
+  .qtext{{font-size:13.5px;font-weight:700;margin-bottom:10px;line-height:1.45}}
+  .opts{{display:flex;flex-direction:column;gap:4px}}
+  .opt-ok{{background:#D1FAE5;border:1.5px solid #059669;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;color:#065F46}}
+  .opt-no{{background:#F8FAFF;border:1.5px solid #E2E8F4;border-radius:6px;padding:6px 10px;font-size:12px;color:#475569}}
+  .rep-box{{background:#D1FAE5;border:1.5px solid #059669;border-radius:6px;padding:7px 12px;font-size:12px;color:#065F46}}
+  .footer{{text-align:center;color:#94A3B8;font-size:11px;margin-top:20px;padding-top:14px;border-top:1px solid #E2E8F4}}
+  .print-btn{{display:block;background:#2563EB;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin:0 auto 20px;font-family:Inter,sans-serif;letter-spacing:-.01em}}
+</style></head><body>
+  <button class="print-btn no-print" onclick="window.print()">🖨️ Imprimer / Enregistrer en PDF</button>
+  <div class="header">
+    <h1>{quiz["titre"]}</h1>
+    <div class="meta">
+      <span class="code">Code : {quiz["code"]}</span>
+      <span>⏱ {quiz["duree_minutes"]} min</span>
+      <span>📝 {len(questions)} question(s)</span>
+      <span>🏆 {total_pts:.0f} point(s)</span>
+    </div>
+    {f'<div style="margin-top:7px;font-size:11px;opacity:.7">{quiz["description"]}</div>' if quiz.get("description") else ""}
+  </div>
+  {rows}
+  <div class="footer">Généré le {now} — QuizAgent CI</div>
+</body></html>"""
+    return html.encode("utf-8")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PAGE — HOME
-# ══════════════════════════════════════════════════════════════════════════════
+
 def render_home():
     org = f'<p class="hero-org">{config.ORG_NAME}</p>' if config.ORG_NAME else ""
     st.markdown(f"""
@@ -1319,21 +1289,12 @@ def _tab_quizzes():
                 if st.button("🗑 Suppr.", key=f"dq_{quiz['id']}", use_container_width=True):
                     delete_quiz(quiz["id"]); st.rerun()
             if nb > 0:
-                # PDF généré à la demande — pas au chargement
-                if st.button("📄  Télécharger le corrigé PDF", key=f"pdfbtn_{quiz['id']}", use_container_width=True):
-                    try:
-                        from fpdf import FPDF
-                        qs_pdf = get_questions(quiz["id"])
-                        pdf_data = _make_pdf(quiz, qs_pdf)
-                        st.download_button("⬇️  Cliquez ici pour télécharger",
-                                            data=pdf_data,
-                                            file_name=f"corrige_{quiz['code']}.pdf",
-                                            mime="application/pdf",
-                                            key=f"pdf_dl_{quiz['id']}", use_container_width=True)
-                    except ImportError:
-                        st.error("fpdf2 non installé. Vérifiez requirements.txt.")
-                    except Exception as e:
-                        st.error(f"Erreur PDF : {e}")
+                qs = get_questions(quiz["id"])
+                pdf_data = _make_pdf(quiz, qs)
+                st.download_button("📄  Corrigé PDF", data=pdf_data,
+                                    file_name=f"corrige_{quiz['code']}.html",
+                                    mime="text/html",
+                                    key=f"pdf_{quiz['id']}", use_container_width=True)
 
 
 # ── Résultats ─────────────────────────────────────────────────────────────────
