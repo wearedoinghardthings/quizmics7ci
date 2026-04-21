@@ -17,6 +17,7 @@ from database import (
     create_session, save_quiz_progress, get_incomplete_session,
     submit_session, get_results, session_already_completed, get_stats,
     get_question_stats,
+    get_surveillance,
 )
 
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
@@ -76,8 +77,9 @@ html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-f
 .qmeta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
 .qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
-.qtxt{font-size:15px;font-weight:400;color:var(--txt);margin:0 0 10px;line-height:1.55;white-space:pre-line}
+.qtxt{font-size:15px;font-weight:600;color:var(--txt);margin:0 0 10px;line-height:1.45}
 .qtxt b{font-weight:800}
+.qtxt span{color:inherit!important}
 .qtxt [style*="color:#DC2626"]{color:#DC2626!important}
 .qtxt [style*="color:#1D4ED8"]{color:#1D4ED8!important}
 .qtxt [style*="color:#059669"]{color:#059669!important}
@@ -769,12 +771,13 @@ def render_admin_dashboard():
     if not st.session_state.admin_logged: go("admin_login"); return
     topbar(config.APP_TITLE+"  ·  Tableau de bord","⚙️")
 
-    t0,t1,t2,t3,t4=st.tabs(["📊 Vue d'ensemble","👥 Agents","📝 Quiz","📋 Résultats","📉 Stats questions"])
+    t0,t1,t2,t3,t4,t5=st.tabs(["📊 Vue d'ensemble","👥 Agents","📝 Quiz","📋 Résultats","📉 Stats questions","🔎 Surveillance"])
     with t0: _tab_overview()
     with t1: _tab_agents()
     with t2: _tab_quizzes()
     with t3: _tab_results()
     with t4: _tab_question_stats()
+    with t5: _tab_surveillance()
 
     st.markdown("---")
     if st.button("🚪  Déconnexion",key="admin_logout",use_container_width=True): st.session_state.admin_logged=False; _save_state(); go("home")
@@ -1049,6 +1052,14 @@ def _tab_question_stats():
         txt_clean = _strip_html(s["texte"])
         preview = txt_clean[:90] + ("…" if len(txt_clean) > 90 else "")
 
+        # Temps moyen par question
+        tps = s.get("tps_moyen_sec")
+        if tps is not None and tps > 0:
+            tps_fmt = f"{int(tps)//60}m{int(tps)%60:02d}s" if tps >= 60 else f"{int(tps)}s"
+            tps_pill = f'<span class="qstat-pill" style="background:#EDE9FE;color:#7C3AED">⏱ {tps_fmt} en moy.</span>'
+        else:
+            tps_pill = ""
+
         st.markdown(f"""
         <div class="qstat-card">
           <div class="qstat-header">
@@ -1065,6 +1076,7 @@ def _tab_question_stats():
             <span class="qstat-pill pill-tot">📊 {total} réponse(s)</span>
             <span class="qstat-pill pill-ok">✅ {bonnes} correcte(s)</span>
             <span class="qstat-pill pill-err">❌ {mauvaises} erreur(s)</span>
+            {tps_pill}
             <span class="qstat-pill" style="background:#F1F5F9;color:#475569">📝 {s.get('quiz_titre','')}</span>
           </div>
         </div>
@@ -1084,6 +1096,7 @@ def _tab_question_stats():
         "Bonnes réponses":  int(s["bonnes_reponses"] or 0),
         "Erreurs":          int(s["mauvaises_reponses"] or 0),
         "Taux d'erreur (%)": float(s["taux_erreur"] or 0),
+        "Temps moyen (s)": s.get("tps_moyen_sec") or "—",
     } for s in stats])
 
     buf = _io.BytesIO()
