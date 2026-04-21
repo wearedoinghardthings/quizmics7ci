@@ -1255,6 +1255,96 @@ def render_admin_quiz_edit():
 
 
 # ══════════════════════════════════════════════════════════════
+
+def _tab_surveillance():
+    """Onglet surveillance anti-fraude."""
+    quizzes = get_all_quizzes()
+    if not quizzes:
+        st.info("Aucun quiz disponible."); return
+
+    opts = {0: "— Tous les quiz —"}
+    opts.update({q["id"]: f"{q['titre']} ({q['code']})" for q in quizzes})
+    sel = st.selectbox("Quiz", list(opts.keys()),
+                       format_func=lambda x: opts[x],
+                       label_visibility="collapsed", key="surv_sel")
+
+    data = get_surveillance(sel if sel else None)
+    if not data:
+        st.info("Aucune soumission pour l'instant."); return
+
+    suspects = [r for r in data if r.get("suspects")]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Soumissions", len(data))
+    c2.metric("Cas suspects", len(suspects))
+    multi = len(set((r["agent_id"], r["quiz_id"]) for r in data if r.get("nb_sessions", 1) > 1))
+    c3.metric("Multi-sessions", multi)
+
+    st.markdown("---")
+    only_suspects = st.checkbox("Afficher uniquement les cas suspects", key="surv_filter")
+    rows = suspects if only_suspects else data
+    if only_suspects and not rows:
+        st.success("Aucun cas suspect detecte."); return
+
+    for r in rows:
+        is_suspect = bool(r.get("suspects"))
+        border = "#DC2626" if is_suspect else "#E2E8F4"
+        bg     = "#FFF5F5" if is_suspect else "#FFFFFF"
+        pct    = round(r["score"] / r["max_score"] * 100, 1) if r.get("max_score", 0) > 0 else 0
+        init   = (r["nom"][0] + (r["prenom"][0] if r.get("prenom") else "")).upper()
+        score_col = "#059669" if pct >= 70 else ("#D97706" if pct >= 50 else "#DC2626")
+        badges = ""
+        for s in (r.get("suspects") or []):
+            if "rapide" in s:
+                badges += '<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">Trop rapide</span>'
+            elif "session" in s:
+                badges += f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">{s}</span>'
+        dev  = (r.get("device_info") or "")[:45] or "inconnu"
+        ip   = r.get("ip_address") or "—"
+        duree = r.get("duree_affichee") or "—"
+        st.markdown(
+            f'<div style="background:{bg};border:1.5px solid {border};border-radius:12px;padding:14px 16px;margin:6px 0">' +
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">' +
+            f'<div style="width:36px;height:36px;border-radius:50%;background:#DBEAFE;color:#1D4ED8;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0">{init}</div>' +
+            f'<div style="flex:1"><div style="font-weight:700;font-size:14px">{r["nom"]} {r.get("prenom","")}</div>' +
+            f'<div style="font-size:.78rem;color:#64748B">{r.get("quiz_titre","")}</div></div>' +
+            f'<div style="text-align:right;flex-shrink:0"><div style="font-size:1.1rem;font-weight:900;color:{score_col}">{pct}%</div>' +
+            f'<div style="font-size:.72rem;color:#94A3B8">{duree}</div></div></div>' +
+            f'<div style="display:flex;flex-wrap:wrap;gap:5px">{badges}' +
+            f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">Appareil: {dev}</span>' +
+            f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">IP: {ip}</span></div></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown("---")
+    df = pd.DataFrame([{
+        "Agent":       f"{r['nom']} {r.get('prenom','')}",
+        "Matricule":   r.get("matricule",""),
+        "Quiz":        r.get("quiz_titre",""),
+        "Score (%)":   round(r["score"]/r["max_score"]*100,1) if r.get("max_score",0)>0 else 0,
+        "Duree":       r.get("duree_affichee",""),
+        "Appareil":    r.get("device_info",""),
+        "IP":          r.get("ip_address",""),
+        "Nb sessions": r.get("nb_sessions",1),
+        "Suspect":     ", ".join(r.get("suspects",[]) or []) or "Non",
+        "Soumis le":   r.get("completed_at",""),
+    } for r in rows])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="Surveillance")
+        ws = w.sheets["Surveillance"]
+        from openpyxl.styles import PatternFill
+        for row in ws.iter_rows(min_row=2):
+            if row[8].value and row[8].value != "Non":
+                for cell in row: cell.fill = PatternFill("solid", fgColor="FEE2E2")
+        for col in ws.columns:
+            ws.column_dimensions[col[0].column_letter].width = min(
+                max(len(str(c.value or ""))+4 for c in col), 50)
+    buf.seek(0)
+    st.download_button("Exporter rapport (Excel)", data=buf.getvalue(),
+                       file_name=f"surveillance_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       use_container_width=True, key="dl_surv")
+
 #  ROUTEUR
 # ══════════════════════════════════════════════════════════════
 
