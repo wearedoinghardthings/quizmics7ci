@@ -65,11 +65,6 @@ html,body{font-family:'Inter',sans-serif;background:var(--bg);min-height:100vh;c
 .q-type{color:var(--text3);font-size:.75rem;font-weight:600}
 .q-pts{background:#F1F5F9;color:var(--text2);font-size:.7rem;font-weight:800;padding:3px 10px;border-radius:99px;margin-left:auto}
 .qtext{font-size:15.5px;font-weight:400;color:var(--text);margin:0 0 12px;line-height:1.55}
-.qtext b{font-weight:800}
-.qtext span[style*="color:#DC2626"]{color:#DC2626!important}
-.qtext span[style*="color:#1D4ED8"]{color:#1D4ED8!important}
-.qtext span[style*="color:#059669"]{color:#059669!important}
-.qtext span[style*="color:#D97706"]{color:#D97706!important}
 
 /* Options */
 .options{display:flex;flex-direction:column;gap:7px;padding:0 0 6px}
@@ -199,7 +194,8 @@ async function supa(path, opts = {}) {
 }
 
 // ── Charger les données ──
-let agent = null, quiz = null, questions = [], answers = {}, sessionId = null, startEpoch = null;
+let agent = null, quiz = null, questions = [], answers = {}, sessionId = null, startEpoch = null, deviceInfo = "";
+let answerTimestamps = {};  // {question_id: epoch_seconds}
 let timerInterval = null, autoSaveInterval = null;
 
 async function init() {
@@ -208,6 +204,14 @@ async function init() {
     quiz      = JSON.parse(sessionStorage.getItem("qa_quiz") || "null");
     sessionId = parseInt(sessionStorage.getItem("qa_session_id") || "0");
     startEpoch = parseFloat(sessionStorage.getItem("qa_start_epoch") || (Date.now()/1000));
+
+    // Capturer infos appareil pour surveillance anti-fraude
+    deviceInfo = [
+      navigator.platform || "",
+      screen.width + "x" + screen.height,
+      navigator.language || "",
+      /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "mobile" : "desktop"
+    ].filter(Boolean).join(" | ");
 
     if (!agent || !quiz || !sessionId) { window.location.href = "index.html"; return; }
 
@@ -259,21 +263,15 @@ async function init() {
 
 
 // ── Formatage texte riche ──
-// L'app produit directement du HTML : <b>, <span style="color:...">, <br>
-// On passe le texte tel quel — le navigateur le rend nativement.
-// On garde aussi la compatibilité avec les anciens formats [rouge] et **gras**
 function fmt(text) {
   let t = String(text || "");
-  // Anciens formats BBcode (compatibilité)
   t = t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  t = t.replace(/\*([^*]+?)\*/g,  "<i>$1</i>");
-  t = t.replace(/\[rouge\](.+?)\[\/rouge\]/g,   '<span style="color:#DC2626;font-weight:700">$1</span>');
-  t = t.replace(/\[bleu\](.+?)\[\/bleu\]/g,     '<span style="color:#1D4ED8;font-weight:700">$1</span>');
-  t = t.replace(/\[vert\](.+?)\[\/vert\]/g,     '<span style="color:#059669;font-weight:700">$1</span>');
-  t = t.replace(/\[orange\](.+?)\[\/orange\]/g, '<span style="color:#D97706;font-weight:700">$1</span>');
-  // Sauts de ligne texte brut → <br>
-  t = t.replace(/(?<!>)\n/g, "<br>");
-  // Le HTML natif (<b>, <span style=...>, <br>) est déjà correct → on retourne tel quel
+  t = t.replace(/\*([^*]+?)\*/g,    "<i>$1</i>");
+  t = t.replace(/\[rouge\](.+?)\[\/rouge\]/g,   '<b style="color:#DC2626!important;font-weight:700">$1</b>');
+  t = t.replace(/\[bleu\](.+?)\[\/bleu\]/g,     '<b style="color:#1D4ED8!important;font-weight:700">$1</b>');
+  t = t.replace(/\[vert\](.+?)\[\/vert\]/g,     '<b style="color:#059669!important;font-weight:700">$1</b>');
+  t = t.replace(/\[orange\](.+?)\[\/orange\]/g, '<b style="color:#D97706!important;font-weight:700">$1</b>');
+  t = t.replace(/\n/g, "<br>");
   return t;
 }
 
@@ -306,10 +304,10 @@ function renderQuestions() {
       ).join("") + `</div>`;
     } else if (q.type === "numeric") {
       inputHtml = `<input type="number" class="q-input" id="q_${q.id}" placeholder="Entrez un nombre…"
-        value="${answers[q.id] || ''}" oninput="answers[${q.id}]=this.value;updateProgress()" inputmode="decimal">`;
+        value="${answers[q.id] || ''}" oninput="answers[${q.id}]=this.value;answerTimestamps[${q.id}]=Date.now()/1000;updateProgress()" inputmode="decimal">`;
     } else {
       inputHtml = `<textarea class="q-input" id="q_${q.id}" placeholder="Votre réponse…"
-        oninput="answers[${q.id}]=this.value;updateProgress()">${answers[q.id] || ''}</textarea>`;
+        oninput="answers[${q.id}]=this.value;answerTimestamps[${q.id}]=Date.now()/1000;updateProgress()">${answers[q.id] || ''}</textarea>`;
     }
 
     return `
@@ -329,6 +327,7 @@ function renderQuestions() {
 
 function selectSingle(qid, oid, el) {
   answers[qid] = oid;
+  answerTimestamps[qid] = Date.now() / 1000;
   const card = document.getElementById(`qcard_${qid}`);
   card.querySelectorAll(".opt").forEach(o => o.classList.remove("selected"));
   el.classList.add("selected");
@@ -337,6 +336,7 @@ function selectSingle(qid, oid, el) {
 
 function toggleMultiple(qid, oid, el) {
   if (!answers[qid]) answers[qid] = [];
+  answerTimestamps[qid] = Date.now() / 1000;
   const idx = answers[qid].indexOf(oid);
   if (idx === -1) { answers[qid].push(oid); el.classList.add("selected"); }
   else { answers[qid].splice(idx, 1); el.classList.remove("selected"); }
@@ -388,7 +388,8 @@ async function autoSave() {
   try {
     await supa(`sessions?id=eq.${sessionId}`, {
       method: "PATCH",
-      body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch }
+      body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch,
+              answer_timestamps_json: JSON.stringify(answerTimestamps) }
     });
   } catch(e) {}
 }
@@ -443,10 +444,21 @@ async function submitQuiz(auto = false) {
     const { score, records } = calcScore();
     const maxScore = questions.reduce((s, q) => s + q.points, 0);
 
-    // Sauvegarder session
+    // Récupérer IP publique (best effort)
+    let ipAddr = "";
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json", {signal: AbortSignal.timeout(3000)});
+      const ipJson = await ipRes.json();
+      ipAddr = ipJson.ip || "";
+    } catch(e) {}
+
+    // Sauvegarder session avec infos surveillance
     await supa(`sessions?id=eq.${sessionId}`, {
       method: "PATCH",
-      body: { score, max_score: maxScore, completed: 1, completed_at: new Date().toISOString(), answers_json: JSON.stringify(answers) }
+      body: { score, max_score: maxScore, completed: 1, completed_at: new Date().toISOString(),
+              answers_json: JSON.stringify(answers),
+              device_info: deviceInfo, ip_address: ipAddr,
+              answer_timestamps_json: JSON.stringify(answerTimestamps) }
     });
 
     // Sauvegarder réponses
