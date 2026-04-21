@@ -424,6 +424,54 @@ def get_stats():
             "avg_score":avg_score,"per_quiz":per_quiz,"recent":recent}
 
 
+def get_question_stats(quiz_id):
+    """Pour chaque question : nb réponses, correctes, erreurs, taux erreur, temps moyen."""
+    questions = get_questions(quiz_id)
+
+    # Timestamps des sessions complétées
+    sessions_ts = _fetchall(
+        "SELECT id, start_time_epoch, answer_timestamps_json FROM sessions WHERE quiz_id=? AND completed=1",
+        (quiz_id,)
+    )
+    import json as _j
+    # {question_id: [delai_en_secondes, ...]}
+    delais = {}
+    for s in sessions_ts:
+        try:
+            start = float(s.get("start_time_epoch") or 0)
+            ts = _j.loads(s.get("answer_timestamps_json") or "{}")
+            for qid_str, epoch in ts.items():
+                qid = int(qid_str)
+                d = float(epoch) - start
+                if 0 < d < 7200:  # ignorer valeurs aberrantes
+                    delais.setdefault(qid, []).append(d)
+        except Exception:
+            pass
+
+    out = []
+    for i, q in enumerate(questions):
+        tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
+        cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
+        t = int(list(tot.values())[0]) if tot else 0
+        c = int(list(cor.values())[0]) if cor else 0
+        e = t - c
+
+        # Temps moyen
+        d_list = delais.get(q["id"], [])
+        tps = round(sum(d_list) / len(d_list)) if d_list else None
+
+        out.append({
+            "num": i+1, "question_id": q["id"],
+            "texte": q["texte"], "type": q["type"], "points": q["points"],
+            "total_reponses": t, "bonnes_reponses": c,
+            "mauvaises_reponses": e,
+            "taux_erreur": round((e/t*100) if t>0 else 0, 1),
+            "tps_moyen_sec": tps,
+        })
+    out.sort(key=lambda x: x["taux_erreur"], reverse=True)
+    return out
+
+
 def get_surveillance(quiz_id=None):
     """
     Retourne les sessions avec infos de surveillance :
