@@ -1077,7 +1077,6 @@ def _tab_question_stats():
             <span class="qstat-pill pill-ok">✅ {bonnes} correcte(s)</span>
             <span class="qstat-pill pill-err">❌ {mauvaises} erreur(s)</span>
             {tps_pill}
-            <span class="qstat-pill" style="background:#F1F5F9;color:#475569">📝 {s.get('quiz_titre','')}</span>
           </div>
         </div>
         """, unsafe_allow_html=True)
