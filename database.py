@@ -517,9 +517,16 @@ def get_surveillance(quiz_id=None):
         WHERE s.completed = 1
     """
     if quiz_id:
-        rows = _fetchall(base + " AND s.quiz_id=? ORDER BY a.nom, s.completed_at DESC", (quiz_id,))
+        completed_rows = _fetchall(base + " AND s.quiz_id=? ORDER BY a.nom, s.completed_at DESC", (quiz_id,))
     else:
-        rows = _fetchall(base + " ORDER BY a.nom, s.completed_at DESC")
+        completed_rows = _fetchall(base + " ORDER BY a.nom, s.completed_at DESC")
+
+    # Compter TOUTES les sessions (complètes + incomplètes) par agent+quiz
+    all_sessions_count = _fetchall(
+        "SELECT agent_id, quiz_id, COUNT(*) as nb FROM sessions GROUP BY agent_id, quiz_id"
+    )
+    session_counts = {(r["agent_id"], r["quiz_id"]): int(r["nb"]) for r in all_sessions_count}
+    rows = completed_rows
 
     # Calculer durée et détecter anomalies
     for r in rows:
@@ -546,7 +553,7 @@ def get_surveillance(quiz_id=None):
 
     for r in rows:
         key = (r["agent_id"], r["quiz_id"])
-        nb_sessions = len(agent_sessions[key])
+        nb_sessions = session_counts.get((r["agent_id"], r["quiz_id"]), len(agent_sessions[key]))
         duree = r.get("duree_secondes")
         duree_min = r.get("duree_minutes", 30) * 60
         suspects = []
