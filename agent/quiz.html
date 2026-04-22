@@ -245,8 +245,9 @@ async function init() {
         Object.assign(answers, saved);
       } catch(e) {}
       try {
-        // Restaurer le log d'appareils précédents
-        const existingLog = JSON.parse(sessData[0].devices_log || "[]");
+        // Restaurer le log d'appareils — fusionner avec l'appareil actuel
+        let existingLog = JSON.parse(sessData[0].devices_log || "[]");
+        if (!existingLog.includes(deviceInfo)) existingLog.push(deviceInfo);
         sessionStorage.setItem("_dlog", JSON.stringify(existingLog));
       } catch(e) {
         sessionStorage.setItem("_dlog", JSON.stringify([deviceInfo]));
