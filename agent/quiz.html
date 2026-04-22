@@ -195,7 +195,6 @@ async function supa(path, opts = {}) {
 
 // ── Charger les données ──
 let agent = null, quiz = null, questions = [], answers = {}, sessionId = null, startEpoch = null, deviceInfo = "";
-let answerTimestamps = {};  // {question_id: epoch_seconds}
 let timerInterval = null, autoSaveInterval = null;
 
 async function init() {
@@ -238,13 +237,22 @@ async function init() {
       }
     }
 
-    // Restaurer réponses si session incomplète
+    // Restaurer réponses + devices_log si session incomplète
     const sessData = await supa(`sessions?id=eq.${sessionId}&limit=1`);
-    if (sessData && sessData[0] && sessData[0].answers_json) {
+    if (sessData && sessData[0]) {
       try {
         const saved = JSON.parse(sessData[0].answers_json || "{}");
         Object.assign(answers, saved);
       } catch(e) {}
+      try {
+        // Restaurer le log d'appareils précédents
+        const existingLog = JSON.parse(sessData[0].devices_log || "[]");
+        sessionStorage.setItem("_dlog", JSON.stringify(existingLog));
+      } catch(e) {
+        sessionStorage.setItem("_dlog", JSON.stringify([deviceInfo]));
+      }
+    } else {
+      sessionStorage.setItem("_dlog", JSON.stringify([deviceInfo]));
     }
 
     // Mettre à jour max_score
@@ -304,10 +312,10 @@ function renderQuestions() {
       ).join("") + `</div>`;
     } else if (q.type === "numeric") {
       inputHtml = `<input type="number" class="q-input" id="q_${q.id}" placeholder="Entrez un nombre…"
-        value="${answers[q.id] || ''}" oninput="answers[${q.id}]=this.value;answerTimestamps[${q.id}]=Date.now()/1000;updateProgress()" inputmode="decimal">`;
+        value="${answers[q.id] || ''}" oninput="answers[${q.id}]=this.value;updateProgress()" inputmode="decimal">`;
     } else {
       inputHtml = `<textarea class="q-input" id="q_${q.id}" placeholder="Votre réponse…"
-        oninput="answers[${q.id}]=this.value;answerTimestamps[${q.id}]=Date.now()/1000;updateProgress()">${answers[q.id] || ''}</textarea>`;
+        oninput="answers[${q.id}]=this.value;updateProgress()">${answers[q.id] || ''}</textarea>`;
     }
 
     return `
@@ -327,7 +335,6 @@ function renderQuestions() {
 
 function selectSingle(qid, oid, el) {
   answers[qid] = oid;
-  answerTimestamps[qid] = Date.now() / 1000;
   const card = document.getElementById(`qcard_${qid}`);
   card.querySelectorAll(".opt").forEach(o => o.classList.remove("selected"));
   el.classList.add("selected");
@@ -336,7 +343,6 @@ function selectSingle(qid, oid, el) {
 
 function toggleMultiple(qid, oid, el) {
   if (!answers[qid]) answers[qid] = [];
-  answerTimestamps[qid] = Date.now() / 1000;
   const idx = answers[qid].indexOf(oid);
   if (idx === -1) { answers[qid].push(oid); el.classList.add("selected"); }
   else { answers[qid].splice(idx, 1); el.classList.remove("selected"); }
@@ -386,10 +392,17 @@ function startTimer() {
 // ── Sauvegarde auto ──
 async function autoSave() {
   try {
+    // Mettre à jour devices_log localement (zero fetch supplémentaire)
+    let dlog = [];
+    try { dlog = JSON.parse(sessionStorage.getItem("_dlog") || "[]"); } catch(e) {}
+    if (deviceInfo && !dlog.includes(deviceInfo)) {
+      dlog.push(deviceInfo);
+      sessionStorage.setItem("_dlog", JSON.stringify(dlog));
+    }
     await supa(`sessions?id=eq.${sessionId}`, {
       method: "PATCH",
       body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch,
-              answer_timestamps_json: JSON.stringify(answerTimestamps) }
+              devices_log: JSON.stringify(dlog) }
     });
   } catch(e) {}
 }
@@ -457,8 +470,7 @@ async function submitQuiz(auto = false) {
       method: "PATCH",
       body: { score, max_score: maxScore, completed: 1, completed_at: new Date().toISOString(),
               answers_json: JSON.stringify(answers),
-              device_info: deviceInfo, ip_address: ipAddr,
-              answer_timestamps_json: JSON.stringify(answerTimestamps) }
+              device_info: deviceInfo, ip_address: ipAddr }
     });
 
     // Sauvegarder réponses
