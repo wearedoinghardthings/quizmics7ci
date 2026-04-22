@@ -1301,6 +1301,32 @@ def _tab_surveillance():
         dev  = (r.get("device_info") or "")[:45] or "inconnu"
         ip   = r.get("ip_address") or "—"
         duree = r.get("duree_affichee") or "—"
+        # Infos appareil début vs fin
+        start_dev = (r.get("start_device_info") or "").strip()
+        end_dev   = (r.get("device_info") or "").strip()
+        start_ip  = (r.get("start_ip_address") or "").strip()
+        end_ip    = (r.get("ip_address") or "").strip()
+
+        dev_changed = start_dev and end_dev and start_dev != end_dev
+        ip_changed  = start_ip and end_ip and start_ip != end_ip
+
+        # devices_log — source la plus fiable
+        unique_devs = r.get("unique_devices") or []
+        dev_html = ""
+        if len(unique_devs) > 1:
+            devs_list = "".join(f'<div style="color:#64748B;margin-top:2px">• {d[:55]}</div>' for d in unique_devs)
+            dev_html = (f'<div style="background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;padding:8px 12px;margin-top:6px;font-size:.75rem">' +
+                        f'<b style="color:#DC2626">⚠️ {len(unique_devs)} appareils différents ont composé cette session</b>' +
+                        devs_list + f'</div>')
+        elif end_dev:
+            dev_html = f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">📱 {end_dev[:45]}</span>'
+
+        ip_html = ""
+        if ip_changed:
+            ip_html = (f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:99px">IP: {start_ip} → {end_ip}</span>')
+        elif end_ip:
+            ip_html = f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">IP: {end_ip}</span>'
+
         st.markdown(
             f'<div style="background:{bg};border:1.5px solid {border};border-radius:12px;padding:14px 16px;margin:6px 0">' +
             f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">' +
@@ -1309,9 +1335,8 @@ def _tab_surveillance():
             f'<div style="font-size:.78rem;color:#64748B">{r.get("quiz_titre","")}</div></div>' +
             f'<div style="text-align:right;flex-shrink:0"><div style="font-size:1.1rem;font-weight:900;color:{score_col}">{pct}%</div>' +
             f'<div style="font-size:.72rem;color:#94A3B8">{duree}</div></div></div>' +
-            f'<div style="display:flex;flex-wrap:wrap;gap:5px">{badges}' +
-            f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">Appareil: {dev}</span>' +
-            f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">IP: {ip}</span></div></div>',
+            f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{badges}{ip_html}</div>' +
+            f'{dev_html}</div>',
             unsafe_allow_html=True
         )
 
@@ -1326,6 +1351,10 @@ def _tab_surveillance():
         "IP":          r.get("ip_address",""),
         "Nb sessions": r.get("nb_sessions",1),
         "Suspect":     ", ".join(r.get("suspects",[]) or []) or "Non",
+        "Appareil debut": r.get("start_device_info",""),
+        "Appareil fin":   r.get("device_info",""),
+        "IP debut":       r.get("start_ip_address",""),
+        "IP fin":         r.get("ip_address",""),
         "Soumis le":   r.get("completed_at",""),
     } for r in rows])
     buf = io.BytesIO()
