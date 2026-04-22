@@ -1275,8 +1275,8 @@ def _tab_surveillance():
     c1, c2, c3 = st.columns(3)
     c1.metric("Soumissions", len(data))
     c2.metric("Cas suspects", len(suspects))
-    multi = len(set((r["agent_id"], r["quiz_id"]) for r in data if r.get("nb_sessions", 1) > 1))
-    c3.metric("Multi-sessions", multi)
+    appareils_suspects = len([r for r in data if len(r.get("unique_devices") or []) > 1])
+    c3.metric("Appareils suspects", appareils_suspects, delta="fraude potentielle" if appareils_suspects > 0 else None, delta_color="inverse")
 
     st.markdown("---")
     only_suspects = st.checkbox("Afficher uniquement les cas suspects", key="surv_filter")
