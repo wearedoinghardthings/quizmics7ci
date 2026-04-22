@@ -176,6 +176,19 @@ const SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co";
 const SUPA_KEY = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv";
 
 let selectedAgent = null;
+
+// Capturer infos appareil dès le chargement
+const START_DEVICE = [
+  navigator.platform || "",
+  screen.width + "x" + screen.height,
+  navigator.language || "",
+  /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "mobile" : "desktop"
+].filter(Boolean).join(" | ");
+
+// Récupérer IP publique en arrière-plan
+let START_IP = "";
+fetch("https://api.ipify.org?format=json", {signal: AbortSignal.timeout(3000)})
+  .then(r => r.json()).then(d => { START_IP = d.ip || ""; }).catch(() => {});
 let searchTimer = null;
 
 const headers = {
@@ -303,23 +316,43 @@ async function startQuiz() {
       if (remaining > 15) {
         sessionId = sess.id;
         startEpoch = epoch;
+
+        // ── SURVEILLANCE : enregistrer immédiatement cet appareil ──
+        // Même si c'est le même agent qui reprend, on trace chaque connexion
+        try {
+          let existingLog = [];
+          try { existingLog = JSON.parse(sess.devices_log || "[]"); } catch(e) {}
+          if (!existingLog.includes(START_DEVICE)) {
+            existingLog.push(START_DEVICE);
+          }
+          // Patch immédiat — avant même d'ouvrir quiz.html
+          await supabase(`sessions?id=eq.${sessionId}`, {
+            method: "PATCH",
+            body: { devices_log: JSON.stringify(existingLog) }
+          });
+        } catch(e) {}
       }
     }
 
     if (!sessionId) {
-      const maxScore = 0; // sera calculé côté quiz.html
+      const maxScore = 0;
       const newSess = await supabase("sessions", {
         method: "POST",
-        body: { agent_id: selectedAgent.id, quiz_id: quiz.id, max_score: maxScore, start_time_epoch: startEpoch, answers_json: "{}", completed: 0 }
+        body: { agent_id: selectedAgent.id, quiz_id: quiz.id, max_score: maxScore,
+                start_time_epoch: startEpoch, answers_json: "{}", completed: 0,
+                start_device_info: START_DEVICE, start_ip_address: START_IP,
+                device_info: START_DEVICE, ip_address: START_IP,
+                devices_log: JSON.stringify([START_DEVICE]) }
       });
       sessionId = Array.isArray(newSess) ? newSess[0].id : newSess.id;
     }
 
-    // Stocker en sessionStorage et rediriger
+    // Stocker en sessionStorage (avec devices_log pour quiz.html)
     sessionStorage.setItem("qa_agent", JSON.stringify(selectedAgent));
     sessionStorage.setItem("qa_quiz", JSON.stringify(quiz));
     sessionStorage.setItem("qa_session_id", sessionId);
     sessionStorage.setItem("qa_start_epoch", startEpoch);
+    sessionStorage.setItem("_dlog", JSON.stringify([START_DEVICE]));
     window.location.href = "quiz.html";
 
   } catch(e) {
