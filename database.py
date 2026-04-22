@@ -199,6 +199,9 @@ def init_db():
     _safe_alter("sessions", "device_info",         "TEXT DEFAULT ''")
     _safe_alter("sessions", "ip_address",          "TEXT DEFAULT ''")
     _safe_alter("sessions", "answer_timestamps_json", "TEXT DEFAULT '{}'")
+    _safe_alter("sessions", "start_device_info",      "TEXT DEFAULT ''")
+    _safe_alter("sessions", "start_ip_address",       "TEXT DEFAULT ''")
+    _safe_alter("sessions", "devices_log",            "TEXT DEFAULT '[]'")
 
     release(conn)
 
@@ -365,12 +368,29 @@ def reorder_questions(qid):
 
 def create_session(agent_id, quiz_id, max_score, start_time_epoch, device_info="", ip_address=""):
     return _execute(
-        "INSERT INTO sessions (agent_id,quiz_id,max_score,start_time_epoch,answers_json,device_info,ip_address) VALUES (?,?,?,?,'{}',?,?)",
-        (agent_id, quiz_id, max_score, start_time_epoch, device_info or "", ip_address or ""))
+        "INSERT INTO sessions (agent_id,quiz_id,max_score,start_time_epoch,answers_json,device_info,ip_address,start_device_info,start_ip_address,devices_log) VALUES (?,?,?,?,'{}',?,?,?,?,?)",
+        (agent_id, quiz_id, max_score, start_time_epoch, device_info or "", ip_address or "", device_info or "", ip_address or "", f'["{device_info}"]' if device_info else "[]"))
 
-def save_quiz_progress(session_id, answers_json_str, start_time_epoch, answer_timestamps_json=None):
-    _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,answer_timestamps_json=COALESCE(?,answer_timestamps_json) WHERE id=? AND completed=0",
-         (answers_json_str, start_time_epoch, answer_timestamps_json, session_id))
+def save_quiz_progress(session_id, answers_json_str, start_time_epoch, answer_timestamps_json=None, device_info=None):
+    import json as _j
+    if device_info:
+        # Lire le log actuel et ajouter l'appareil si nouveau — tout en une seule requête
+        sess = _fetchone("SELECT devices_log FROM sessions WHERE id=? AND completed=0", (session_id,))
+        if sess:
+            try:
+                log = _j.loads(sess.get("devices_log") or "[]")
+            except Exception:
+                log = []
+            if device_info not in log:
+                log.append(device_info)
+            log_str = _j.dumps(log)
+        else:
+            log_str = _j.dumps([device_info])
+        _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,answer_timestamps_json=COALESCE(?,answer_timestamps_json),devices_log=? WHERE id=? AND completed=0",
+             (answers_json_str, start_time_epoch, answer_timestamps_json, log_str, session_id))
+    else:
+        _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,answer_timestamps_json=COALESCE(?,answer_timestamps_json) WHERE id=? AND completed=0",
+             (answers_json_str, start_time_epoch, answer_timestamps_json, session_id))
 
 def get_incomplete_session(agent_id, quiz_id):
     return _fetchone(
@@ -474,9 +494,8 @@ def get_question_stats(quiz_id):
 
 def get_surveillance(quiz_id=None):
     """
-    Retourne les sessions avec infos de surveillance :
-    device_info, ip_address, durée en secondes.
-    Signale les cas suspects (durée anormale, plusieurs sessions).
+    Retourne les sessions avec infos de surveillance.
+    Détecte : changement d'appareil, changement IP, durée anormale.
     """
     base = """
         SELECT
@@ -486,8 +505,11 @@ def get_surveillance(quiz_id=None):
             s.score, s.max_score, s.completed,
             s.started_at, s.completed_at,
             s.start_time_epoch,
-            COALESCE(s.device_info,'') AS device_info,
-            COALESCE(s.ip_address,'') AS ip_address,
+            COALESCE(s.device_info,'')        AS device_info,
+            COALESCE(s.ip_address,'')         AS ip_address,
+            COALESCE(s.start_device_info,'')  AS start_device_info,
+            COALESCE(s.start_ip_address,'')   AS start_ip_address,
+            COALESCE(s.devices_log,'[]')       AS devices_log,
             a.id AS agent_id, s.quiz_id
         FROM sessions s
         JOIN agents a ON s.agent_id = a.id
@@ -528,11 +550,35 @@ def get_surveillance(quiz_id=None):
         duree = r.get("duree_secondes")
         duree_min = r.get("duree_minutes", 30) * 60
         suspects = []
-        if nb_sessions > 1:
-            suspects.append(f"{nb_sessions} sessions")
+
+        # Changement d'appareil entre démarrage et soumission
+        start_dev = (r.get("start_device_info") or "").strip()
+        end_dev   = (r.get("device_info") or "").strip()
+        start_ip  = (r.get("start_ip_address") or "").strip()
+        end_ip    = (r.get("ip_address") or "").strip()
+
+        # Vérifier devices_log — le signal le plus fiable
+        import json as _j
+        try:
+            dev_log = _j.loads(r.get("devices_log") or "[]")
+            dev_log = [d for d in dev_log if d and d.strip()]
+        except Exception:
+            dev_log = []
+        unique_devices = list(dict.fromkeys(dev_log))  # dédupliqué en gardant l'ordre
+
+        if len(unique_devices) > 1:
+            suspects.append(f"{len(unique_devices)} appareils différents")
+        elif start_dev and end_dev and start_dev != end_dev:
+            suspects.append("appareil différent")
+        if start_ip and end_ip and start_ip != end_ip:
+            suspects.append("IP différente")
         if duree is not None and duree_min > 0 and duree < duree_min * 0.20:
             suspects.append("trop rapide")
-        r["suspects"] = suspects
+        r["unique_devices"] = unique_devices
+
+        r["suspects"]   = suspects
         r["nb_sessions"] = nb_sessions
+        r["start_device_info"] = start_dev
+        r["start_ip_address"]  = start_ip
 
     return rows
