@@ -438,32 +438,15 @@ def get_stats():
 
 def get_question_stats(quiz_id):
     questions = get_questions(quiz_id)
-    # Nombre total de soumissions pour ce quiz
-    total_sessions_r = _fetchone(
-        "SELECT COUNT(*) as n FROM sessions WHERE quiz_id=? AND completed=1", (quiz_id,))
-    total_sessions = int(list(total_sessions_r.values())[0]) if total_sessions_r else 0
-
     out = []
     for i, q in enumerate(questions):
         tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
         cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
         t = int(list(tot.values())[0]) if tot else 0
         c = int(list(cor.values())[0]) if cor else 0
-        # Non répondu = agents qui ont soumis mais n'ont pas répondu à cette question
-        non_rep = max(0, total_sessions - t)
-        out.append({
-            "num":              i+1,
-            "question_id":      q["id"],
-            "texte":            q["texte"],
-            "type":             q["type"],
-            "points":           q["points"],
-            "total_reponses":   t,
-            "bonnes_reponses":  c,
-            "mauvaises_reponses": t - c,
-            "non_reponses":     non_rep,
-            "taux_erreur":      round(((t-c)/t*100) if t>0 else 0, 1),
-            "taux_non_rep":     round((non_rep/total_sessions*100) if total_sessions>0 else 0, 1),
-        })
+        out.append({"num":i+1,"question_id":q["id"],"texte":q["texte"],"type":q["type"],
+                    "points":q["points"],"total_reponses":t,"bonnes_reponses":c,
+                    "mauvaises_reponses":t-c,"taux_erreur":round(((t-c)/t*100) if t>0 else 0,1)})
     out.sort(key=lambda x: x["taux_erreur"], reverse=True)
     return out
 
