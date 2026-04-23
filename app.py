@@ -1061,6 +1061,13 @@ def _tab_results():
                 for r in results:
                     sid = r.get("id")
                     if not sid: continue
+                    # Compter le nb de sessions de cet agent pour ce quiz
+                    from database import _fetchone as _db_fo
+                    nb_sess_r = _db_fo(
+                        "SELECT COUNT(*) as n FROM sessions WHERE agent_id=? AND quiz_id=?",
+                        (r.get("agent_id") or 0, r.get("quiz_id") or 0)
+                    )
+                    nb_sess = int(list(nb_sess_r.values())[0]) if nb_sess_r else 1
                     answers = get_session_answers(sid)
                     pct = round(r["score"]/r["max_score"]*100, 1) if r.get("max_score",0)>0 else 0
                     for a in answers:
@@ -1082,20 +1089,21 @@ def _tab_results():
                             cor_txt  = (a.get("reponse_correcte_txt") or "Question ouverte")
 
                         rows_detail.append({
-                            "Agent":        f"{r['nom']} {r['prenom']}",
-                            "Matricule":    r.get("matricule",""),
-                            "Quiz":         r.get("quiz_titre",""),
-                            "Score total":  r["score"],
-                            "Sur":          r["max_score"],
-                            "% total":      pct,
-                            "Q N°":         a.get("num", ""),
-                            "Question":     _strip_html(a["texte"])[:100],
-                            "Type":         a["type"],
-                            "Pts question": a["points"],
-                            "Réponse agent":resp_txt,
-                            "Bonne réponse":cor_txt,
-                            "Correct":      "✅" if a["is_correct"] else "❌",
-                            "Date":         r.get("completed_at",""),
+                            "Agent":         f"{r['nom']} {r['prenom']}",
+                            "Matricule":     r.get("matricule",""),
+                            "Quiz":          r.get("quiz_titre",""),
+                            "Nb sessions":   nb_sess,
+                            "Score total":   r["score"],
+                            "Sur":           r["max_score"],
+                            "% total":       pct,
+                            "Q N°":          a.get("num", ""),
+                            "Question":      _strip_html(a["texte"])[:100],
+                            "Type":          a["type"],
+                            "Pts question":  a["points"],
+                            "Réponse agent": resp_txt,
+                            "Bonne réponse": cor_txt,
+                            "Correct":       "✅" if a["is_correct"] else "❌",
+                            "Date":          r.get("completed_at",""),
                         })
 
                 if not rows_detail:
@@ -1152,15 +1160,34 @@ def _tab_question_stats():
 
     total_q = len(stats)
     erreurs_hautes = sum(1 for s in stats if (s["taux_erreur"] or 0) >= 50)
+    non_rep_hautes = sum(1 for s in stats if s.get("non_reponses", 0) > 0)
+    nb_sess = stats[0].get("nb_sessions", 0) if stats else 0
 
     kpi_grid([
         ("❓", total_q,        "Questions analysées", "b"),
         ("🚨", erreurs_hautes, "Questions difficiles (≥50% d'erreurs)", "o"),
-        ("📊", f"{sum(s['total_reponses'] or 0 for s in stats)}", "Réponses totales", "p"),
+        ("⬜", non_rep_hautes, "Questions avec absences de réponse", "p"),
         ("✅", f"{sum(s['bonnes_reponses'] or 0 for s in stats)}", "Bonnes réponses", "g"),
     ])
 
-    slbl(f"Questions classées par taux d'erreur (du + difficile au + facile)")
+    # Questions non répondues
+    non_rep_qs = [s for s in stats if s.get("non_reponses", 0) > 0]
+    if non_rep_qs:
+        slbl(f"Questions avec agents n'ayant pas répondu ({nb_sess} soumissions au total)")
+        for s in sorted(non_rep_qs, key=lambda x: x.get("non_reponses",0), reverse=True):
+            nr  = s.get("non_reponses", 0)
+            prt = s.get("taux_participation", 0)
+            txt = _strip_html(s["texte"])[:80] + ("…" if len(s["texte"])>80 else "")
+            col = "#DC2626" if nb_sess > 0 and nr > nb_sess * 0.3 else "#D97706"
+            st.markdown(
+                f'<div style="background:#FFFBEB;border:1.5px solid #FCD34D;border-left:4px solid {col};' +
+                f'border-radius:0 10px 10px 0;padding:10px 14px;margin:6px 0;font-size:.85rem">' +
+                f'<b style="color:{col}">⬜ {nr} agent(s) n\'ont pas répondu</b> ' +
+                f'<span style="color:#64748B">({prt:.0f}% de participation)</span><br>' +
+                f'<span style="color:#0F172A">{txt}</span></div>',
+                unsafe_allow_html=True)
+
+    slbl(f"Toutes les questions — classées par taux d'erreur")
 
     for i, s in enumerate(stats):
         taux = float(s["taux_erreur"] or 0)
@@ -1209,6 +1236,8 @@ def _tab_question_stats():
         "Total réponses":   int(s["total_reponses"] or 0),
         "Bonnes réponses":  int(s["bonnes_reponses"] or 0),
         "Erreurs":          int(s["mauvaises_reponses"] or 0),
+        "Non répondus":     int(s.get("non_reponses", 0)),
+        "% participation":  float(s.get("taux_participation", 0)),
         "Taux d'erreur (%)": float(s["taux_erreur"] or 0),
     } for s in stats])
 
@@ -1430,8 +1459,13 @@ def _tab_surveillance():
 
     st.markdown("---")
     only_s=st.checkbox("Cas suspects uniquement",key="surv_filter")
+    search_s=st.text_input("🔍 Rechercher un agent",placeholder="Nom, matricule…",label_visibility="collapsed",key="surv_search")
     rows=suspects if only_s else data
+    if search_s.strip():
+        q_low=search_s.lower()
+        rows=[r for r in rows if q_low in f"{r['nom']} {r.get('prenom','')} {r.get('matricule','')}".lower()]
     if only_s and not rows: st.success("✅ Aucun cas suspect détecté."); return
+    if search_s.strip() and not rows: st.info("Aucun agent trouvé pour cette recherche."); return
 
     for r in rows:
         is_s   = bool(r.get("suspects"))
