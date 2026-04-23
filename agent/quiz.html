@@ -237,22 +237,84 @@ async function init() {
       }
     }
 
-    // Restaurer réponses si session incomplète
+    // Restaurer réponses + devices_log si session incomplète
     const sessData = await supa(`sessions?id=eq.${sessionId}&limit=1`);
-    if (sessData && sessData[0] && sessData[0].answers_json) {
+    if (sessData && sessData[0]) {
       try {
         const saved = JSON.parse(sessData[0].answers_json || "{}");
         Object.assign(answers, saved);
       } catch(e) {}
+      try {
+        // Restaurer le log d'appareils — fusionner avec l'appareil actuel
+        let existingLog = JSON.parse(sessData[0].devices_log || "[]");
+        if (!existingLog.includes(deviceInfo)) existingLog.push(deviceInfo);
+        sessionStorage.setItem("_dlog", JSON.stringify(existingLog));
+      } catch(e) {
+        sessionStorage.setItem("_dlog", JSON.stringify([deviceInfo]));
+      }
+    } else {
+      sessionStorage.setItem("_dlog", JSON.stringify([deviceInfo]));
     }
 
     // Mettre à jour max_score
     const maxScore = questions.reduce((s, q) => s + q.points, 0);
     await supa(`sessions?id=eq.${sessionId}`, { method: "PATCH", body: { max_score: maxScore } });
 
+    // Paramètres malus et anticheat
+    window.MALUS_ACTIF  = quiz.malus_actif  ? true : false;
+    window.MALUS_POINTS = parseFloat(quiz.malus_points || 0);
+    window.ANTICHEAT    = quiz.anticheat_actif ? true : false;
+    // Vérifier si cet agent est concerné par l'anticheat
+    if (window.ANTICHEAT) {
+      try {
+        const acList = JSON.parse(quiz.anticheat_agents || "[]");
+        if (acList.length > 0 && !acList.includes(agent.id)) {
+          window.ANTICHEAT = false; // pas dans la liste spécifique
+        }
+      } catch(e) {}
+    }
+
     renderQuestions();
     startTimer();
     autoSaveInterval = setInterval(autoSave, 5000);
+
+    // ── Anti-quitter ──
+    if (window.ANTICHEAT) {
+      window._quitCount = 0;
+      window._quitMax   = 3; // soumission automatique après 3 sorties
+
+      // Afficher bannière d'avertissement
+      const banner = document.createElement("div");
+      banner.id = "anticheat-banner";
+      banner.style.cssText = "position:fixed;bottom:80px;left:16px;right:16px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:10px;padding:10px 14px;font-size:.8rem;font-weight:600;color:#92400E;z-index:99998;text-align:center";
+      banner.innerHTML = "🔒 Mode surveillé — quitter cet écran entraîne la soumission automatique";
+      document.body.appendChild(banner);
+
+      function _onQuit() {
+        if (document.hidden || !document.hasFocus()) {
+          window._quitCount++;
+          // Mettre à jour quit_count en base immédiatement
+          supa(`sessions?id=eq.${sessionId}`, {
+            method: "PATCH",
+            body: { quit_count: window._quitCount }
+          }).catch(() => {});
+          // Avertissement visuel
+          banner.style.background = "#FEE2E2";
+          banner.style.borderColor = "#FCA5A5";
+          banner.style.color = "#991B1B";
+          const remaining = window._quitMax - window._quitCount;
+          banner.innerHTML = remaining > 0
+            ? `⚠️ Sortie détectée (${window._quitCount}/${window._quitMax}) — encore ${remaining} avant soumission automatique`
+            : "🚨 Soumission automatique en cours…";
+          if (window._quitCount >= window._quitMax) {
+            clearInterval(autoSaveInterval);
+            setTimeout(() => submitQuiz(true), 1500);
+          }
+        }
+      }
+      document.addEventListener("visibilitychange", _onQuit);
+      window.addEventListener("blur", _onQuit);
+    }
 
   } catch(e) {
     alert("Erreur de chargement : " + e.message + "\nRetour à l'accueil.");
@@ -383,9 +445,17 @@ function startTimer() {
 // ── Sauvegarde auto ──
 async function autoSave() {
   try {
+    // Mettre à jour devices_log localement (zero fetch supplémentaire)
+    let dlog = [];
+    try { dlog = JSON.parse(sessionStorage.getItem("_dlog") || "[]"); } catch(e) {}
+    if (deviceInfo && !dlog.includes(deviceInfo)) {
+      dlog.push(deviceInfo);
+      sessionStorage.setItem("_dlog", JSON.stringify(dlog));
+    }
     await supa(`sessions?id=eq.${sessionId}`, {
       method: "PATCH",
-      body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch }
+      body: { answers_json: JSON.stringify(answers), start_time_epoch: startEpoch,
+              devices_log: JSON.stringify(dlog) }
     });
   } catch(e) {}
 }
@@ -400,10 +470,12 @@ function calcScore() {
     if (q.type === "single") {
       const correct = q.options.filter(o => o.is_correct).map(o => o.id);
       ok = correct.includes(resp) ? 1 : 0;
+      if (!ok && resp !== null && resp !== undefined && resp !== "" && window.MALUS_ACTIF) ok = -1;
     } else if (q.type === "multiple") {
       const correct = new Set(q.options.filter(o => o.is_correct).map(o => o.id));
       const given = new Set(Array.isArray(resp) ? resp : []);
       ok = (correct.size > 0 && [...correct].every(id => given.has(id)) && [...given].every(id => correct.has(id))) ? 1 : 0;
+      if (!ok && given.size > 0 && window.MALUS_ACTIF) ok = -1;
     } else if (q.type === "numeric") {
       const exp = q.reponse_correcte_num !== null ? parseFloat(q.reponse_correcte_num) : null;
       const giv = resp !== undefined && resp !== "" ? parseFloat(String(resp).replace(",",".")) : null;
@@ -415,8 +487,9 @@ function calcScore() {
         ok = acceptable.includes((resp || "").toLowerCase().trim()) ? 1 : 0;
       } else { ok = 1; }
     }
-    if (ok) score += q.points;
-    records.push({ session_id: sessionId, question_id: q.id, reponse: JSON.stringify(resp), is_correct: ok });
+    if (ok === 1)  score += q.points;
+    if (ok === -1) score -= (window.MALUS_POINTS > 0 ? window.MALUS_POINTS : q.points);
+    records.push({ session_id: sessionId, question_id: q.id, reponse: JSON.stringify(resp), is_correct: ok === 1 ? 1 : 0 });
   }
   return { score, records };
 }
