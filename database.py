@@ -198,15 +198,15 @@ def init_db():
     _safe_alter("sessions", "answers_json",        "TEXT DEFAULT '{}'")
     _safe_alter("sessions", "device_info",         "TEXT DEFAULT ''")
     _safe_alter("sessions", "ip_address",          "TEXT DEFAULT ''")
-    _safe_alter("sessions", "answer_timestamps_json", "TEXT DEFAULT '{}'")
-    _safe_alter("sessions", "start_device_info",      "TEXT DEFAULT ''")
-    _safe_alter("sessions", "start_ip_address",       "TEXT DEFAULT ''")
-    _safe_alter("sessions", "devices_log",            "TEXT DEFAULT '[]'")
-    _safe_alter("sessions", "quit_count",             "INTEGER DEFAULT 0")
-    _safe_alter("quizzes",  "malus_actif",            "INTEGER DEFAULT 0")
-    _safe_alter("quizzes",  "malus_points",           "REAL DEFAULT 0")
-    _safe_alter("quizzes",  "anticheat_actif",        "INTEGER DEFAULT 0")
-    _safe_alter("quizzes",  "anticheat_agents",       "TEXT DEFAULT '[]'")
+    _safe_alter("sessions", "start_device_info",   "TEXT DEFAULT ''")
+    _safe_alter("sessions", "start_ip_address",    "TEXT DEFAULT ''")
+    _safe_alter("sessions", "devices_log",         "TEXT DEFAULT '[]'")
+    _safe_alter("sessions", "quit_count",          "INTEGER DEFAULT 0")
+    _safe_alter("sessions", "answer_timestamps_json","TEXT DEFAULT '{}'")
+    _safe_alter("quizzes",  "malus_actif",         "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "malus_points",        "REAL DEFAULT 0")
+    _safe_alter("quizzes",  "anticheat_actif",     "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "anticheat_agents",    "TEXT DEFAULT '[]'")
 
     release(conn)
 
@@ -328,14 +328,14 @@ def get_all_quizzes():
 def get_quiz(qid):
     return _fetchone("SELECT * FROM quizzes WHERE id=?", (qid,))
 
-def create_quiz(titre, code, duree, desc, show_score=1, randomize=0):
+def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]"):
     return _execute(
-        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions) VALUES (?,?,?,?,?,?)",
-        (titre, code.upper(), duree, desc, show_score, randomize))
+        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents))
 
-def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0):
-    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=? WHERE id=?",
-         (titre, code.upper(), duree, desc, actif, show_score, randomize, qid))
+def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]"):
+    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=? WHERE id=?",
+         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, qid))
 
 def delete_quiz(qid):
     _run("DELETE FROM quizzes WHERE id=?", (qid,))
@@ -371,56 +371,39 @@ def reorder_questions(qid):
 
 # ── SESSIONS ──────────────────────────────────────────────────────────────────
 
-def create_session(agent_id, quiz_id, max_score, start_time_epoch, device_info="", ip_address=""):
+def create_session(agent_id, quiz_id, max_score, start_time_epoch):
     return _execute(
-        "INSERT INTO sessions (agent_id,quiz_id,max_score,start_time_epoch,answers_json,device_info,ip_address,start_device_info,start_ip_address,devices_log) VALUES (?,?,?,?,'{}',?,?,?,?,?)",
-        (agent_id, quiz_id, max_score, start_time_epoch, device_info or "", ip_address or "", device_info or "", ip_address or "", f'["{device_info}"]' if device_info else "[]"))
+        "INSERT INTO sessions (agent_id,quiz_id,max_score,start_time_epoch,answers_json) VALUES (?,?,?,?,'{}')",
+        (agent_id, quiz_id, max_score, start_time_epoch))
 
-def save_quiz_progress(session_id, answers_json_str, start_time_epoch, answer_timestamps_json=None, device_info=None):
-    import json as _j
-    if device_info:
-        # Lire le log actuel et ajouter l'appareil si nouveau — tout en une seule requête
-        sess = _fetchone("SELECT devices_log FROM sessions WHERE id=? AND completed=0", (session_id,))
-        if sess:
-            try:
-                log = _j.loads(sess.get("devices_log") or "[]")
-            except Exception:
-                log = []
-            if device_info not in log:
-                log.append(device_info)
-            log_str = _j.dumps(log)
-        else:
-            log_str = _j.dumps([device_info])
-        _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,answer_timestamps_json=COALESCE(?,answer_timestamps_json),devices_log=? WHERE id=? AND completed=0",
-             (answers_json_str, start_time_epoch, answer_timestamps_json, log_str, session_id))
+def save_quiz_progress(session_id, answers_json_str, start_time_epoch, devices_log=None):
+    if devices_log is not None:
+        _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,devices_log=? WHERE id=? AND completed=0",
+             (answers_json_str, start_time_epoch, devices_log, session_id))
     else:
-        _run("UPDATE sessions SET answers_json=?,start_time_epoch=?,answer_timestamps_json=COALESCE(?,answer_timestamps_json) WHERE id=? AND completed=0",
-             (answers_json_str, start_time_epoch, answer_timestamps_json, session_id))
+        _run("UPDATE sessions SET answers_json=?,start_time_epoch=? WHERE id=? AND completed=0",
+             (answers_json_str, start_time_epoch, session_id))
 
 def get_incomplete_session(agent_id, quiz_id):
     return _fetchone(
         "SELECT * FROM sessions WHERE agent_id=? AND quiz_id=? AND completed=0 ORDER BY started_at DESC LIMIT 1",
         (agent_id, quiz_id))
 
-def submit_session(session_id, score, records, device_info=None, ip_address=None, answer_timestamps_json=None, quit_count=None):
-    extra_sets = []
-    extra_vals = []
-    if device_info is not None:            extra_sets.append("device_info=?");            extra_vals.append(device_info)
-    if ip_address is not None:             extra_sets.append("ip_address=?");             extra_vals.append(ip_address)
-    if answer_timestamps_json is not None: extra_sets.append("answer_timestamps_json=?"); extra_vals.append(answer_timestamps_json)
-    if quit_count is not None:             extra_sets.append("quit_count=?");             extra_vals.append(quit_count)
-    extras = (","+",".join(extra_sets)) if extra_sets else ""
-    _run(f"UPDATE sessions SET score=?,completed=1,completed_at=?{extras} WHERE id=?",
-         tuple([score, datetime.now().isoformat()] + extra_vals + [session_id]))
+def submit_session(session_id, score, records, device_info=None, ip_address=None, quit_count=None, devices_log=None):
+    sets, vals = ["score=?","completed=1","completed_at=?"], [score, datetime.now().isoformat()]
+    if device_info  is not None: sets.append("device_info=?");  vals.append(device_info)
+    if ip_address   is not None: sets.append("ip_address=?");   vals.append(ip_address)
+    if quit_count   is not None: sets.append("quit_count=?");   vals.append(quit_count)
+    if devices_log  is not None: sets.append("devices_log=?");  vals.append(devices_log)
+    vals.append(session_id)
+    _run(f"UPDATE sessions SET {','.join(sets)} WHERE id=?", tuple(vals))
     for a in records:
         _execute("INSERT INTO answers (session_id,question_id,reponse,is_correct) VALUES (?,?,?,?)",
                  (session_id, a["question_id"], str(a["reponse"]), int(a["is_correct"])))
 
 def get_results(quiz_id=None):
     base = """SELECT s.id,a.nom,a.prenom,a.matricule,q.titre AS quiz_titre,q.code AS quiz_code,
-              s.score,s.max_score,s.started_at,s.completed_at,
-              COALESCE(s.device_info,'') as device_info,
-              COALESCE(s.ip_address,'') as ip_address
+              s.score,s.max_score,s.started_at,s.completed_at
               FROM sessions s JOIN agents a ON s.agent_id=a.id JOIN quizzes q ON s.quiz_id=q.id
               WHERE s.completed=1"""
     if quiz_id:
@@ -453,148 +436,76 @@ def get_stats():
 
 
 def get_question_stats(quiz_id):
-    """Pour chaque question : nb réponses, correctes, erreurs, taux erreur, temps moyen."""
     questions = get_questions(quiz_id)
-
-    # Timestamps des sessions complétées
-    sessions_ts = _fetchall(
-        "SELECT id, start_time_epoch, answer_timestamps_json FROM sessions WHERE quiz_id=? AND completed=1",
-        (quiz_id,)
-    )
-    import json as _j
-    # {question_id: [delai_en_secondes, ...]}
-    delais = {}
-    for s in sessions_ts:
-        try:
-            start = float(s.get("start_time_epoch") or 0)
-            ts = _j.loads(s.get("answer_timestamps_json") or "{}")
-            for qid_str, epoch in ts.items():
-                qid = int(qid_str)
-                d = float(epoch) - start
-                if 0 < d < 7200:  # ignorer valeurs aberrantes
-                    delais.setdefault(qid, []).append(d)
-        except Exception:
-            pass
-
     out = []
     for i, q in enumerate(questions):
         tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
         cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
         t = int(list(tot.values())[0]) if tot else 0
         c = int(list(cor.values())[0]) if cor else 0
-        e = t - c
-
-        # Temps moyen
-        d_list = delais.get(q["id"], [])
-        tps = round(sum(d_list) / len(d_list)) if d_list else None
-
-        out.append({
-            "num": i+1, "question_id": q["id"],
-            "texte": q["texte"], "type": q["type"], "points": q["points"],
-            "total_reponses": t, "bonnes_reponses": c,
-            "mauvaises_reponses": e,
-            "taux_erreur": round((e/t*100) if t>0 else 0, 1),
-            "tps_moyen_sec": tps,
-        })
+        out.append({"num":i+1,"question_id":q["id"],"texte":q["texte"],"type":q["type"],
+                    "points":q["points"],"total_reponses":t,"bonnes_reponses":c,
+                    "mauvaises_reponses":t-c,"taux_erreur":round(((t-c)/t*100) if t>0 else 0,1)})
     out.sort(key=lambda x: x["taux_erreur"], reverse=True)
     return out
 
 
 def get_surveillance(quiz_id=None):
-    """
-    Retourne les sessions avec infos de surveillance.
-    Détecte : changement d'appareil, changement IP, durée anormale.
-    """
     base = """
-        SELECT
-            s.id, a.nom, a.prenom, a.matricule,
-            q.titre AS quiz_titre, q.code AS quiz_code,
-            q.duree_minutes,
-            s.score, s.max_score, s.completed,
-            s.started_at, s.completed_at,
-            s.start_time_epoch,
-            COALESCE(s.device_info,'')        AS device_info,
-            COALESCE(s.ip_address,'')         AS ip_address,
-            COALESCE(s.start_device_info,'')  AS start_device_info,
-            COALESCE(s.start_ip_address,'')   AS start_ip_address,
-            COALESCE(s.devices_log,'[]')       AS devices_log,
-            COALESCE(s.quit_count,0)           AS quit_count,
-            a.id AS agent_id, s.quiz_id
+        SELECT s.id, a.nom, a.prenom, a.matricule,
+               q.titre AS quiz_titre, q.code AS quiz_code, q.duree_minutes,
+               s.score, s.max_score, s.started_at, s.completed_at, s.start_time_epoch,
+               COALESCE(s.device_info,'')       AS device_info,
+               COALESCE(s.ip_address,'')        AS ip_address,
+               COALESCE(s.start_device_info,'') AS start_device_info,
+               COALESCE(s.devices_log,'[]')     AS devices_log,
+               COALESCE(s.quit_count,0)         AS quit_count,
+               a.id AS agent_id, s.quiz_id
         FROM sessions s
-        JOIN agents a ON s.agent_id = a.id
-        JOIN quizzes q ON s.quiz_id = q.id
-        WHERE s.completed = 1
-    """
-    if quiz_id:
-        completed_rows = _fetchall(base + " AND s.quiz_id=? ORDER BY a.nom, s.completed_at DESC", (quiz_id,))
-    else:
-        completed_rows = _fetchall(base + " ORDER BY a.nom, s.completed_at DESC")
+        JOIN agents a ON s.agent_id=a.id
+        JOIN quizzes q ON s.quiz_id=q.id
+        WHERE s.completed=1"""
+    rows = _fetchall(base+" AND s.quiz_id=? ORDER BY a.nom,s.completed_at DESC",(quiz_id,)) if quiz_id            else _fetchall(base+" ORDER BY a.nom,s.completed_at DESC")
 
-    # Compter TOUTES les sessions (complètes + incomplètes) par agent+quiz
-    all_sessions_count = _fetchall(
-        "SELECT agent_id, quiz_id, COUNT(*) as nb FROM sessions GROUP BY agent_id, quiz_id"
-    )
-    session_counts = {(r["agent_id"], r["quiz_id"]): int(r["nb"]) for r in all_sessions_count}
-    rows = completed_rows
+    # Compter toutes sessions (complètes + incomplètes)
+    counts = {(r["agent_id"],r["quiz_id"]): int(r["nb"])
+              for r in _fetchall("SELECT agent_id,quiz_id,COUNT(*) as nb FROM sessions GROUP BY agent_id,quiz_id")}
 
-    # Calculer durée et détecter anomalies
     for r in rows:
+        # Durée
         try:
-            if r.get("start_time_epoch") and r.get("completed_at"):
-                import time as _t
-                completed_epoch = datetime.fromisoformat(r["completed_at"]).timestamp()
-                duree = completed_epoch - float(r["start_time_epoch"])
-                r["duree_secondes"] = int(duree)
-                r["duree_affichee"] = f"{int(duree//60)}m{int(duree%60):02d}s"
-            else:
-                r["duree_secondes"] = None
-                r["duree_affichee"] = "—"
+            ep = float(r.get("start_time_epoch") or 0)
+            fin = datetime.fromisoformat(r["completed_at"]).timestamp() if r.get("completed_at") else 0
+            d = int(fin - ep) if ep and fin else None
+            r["duree_secondes"] = d
+            r["duree_affichee"] = f"{d//60}m{d%60:02d}s" if d else "—"
         except Exception:
-            r["duree_secondes"] = None
-            r["duree_affichee"] = "—"
+            r["duree_secondes"] = None; r["duree_affichee"] = "—"
 
-    # Détecter les agents suspects
-    # (plusieurs sessions pour le même quiz, ou durée < 20% du temps imparti)
-    agent_sessions = {}
-    for r in rows:
-        key = (r["agent_id"], r["quiz_id"])
-        agent_sessions.setdefault(key, []).append(r)
+        # devices_log
+        try:
+            import json as _j
+            dlog = [x for x in _j.loads(r.get("devices_log") or "[]") if x and x.strip()]
+            unique_devs = list(dict.fromkeys(dlog))
+        except Exception:
+            unique_devs = []
+        r["unique_devices"] = unique_devs
 
-    for r in rows:
-        key = (r["agent_id"], r["quiz_id"])
-        nb_sessions = session_counts.get((r["agent_id"], r["quiz_id"]), len(agent_sessions[key]))
-        duree = r.get("duree_secondes")
-        duree_min = r.get("duree_minutes", 30) * 60
+        # Suspects
+        nb = counts.get((r["agent_id"],r["quiz_id"]), 1)
+        r["nb_sessions"] = nb
         suspects = []
-
-        # Changement d'appareil entre démarrage et soumission
-        start_dev = (r.get("start_device_info") or "").strip()
-        end_dev   = (r.get("device_info") or "").strip()
-        start_ip  = (r.get("start_ip_address") or "").strip()
-        end_ip    = (r.get("ip_address") or "").strip()
-
-        # Vérifier devices_log — le signal le plus fiable
-        import json as _j
-        try:
-            dev_log = _j.loads(r.get("devices_log") or "[]")
-            dev_log = [d for d in dev_log if d and d.strip()]
-        except Exception:
-            dev_log = []
-        unique_devices = list(dict.fromkeys(dev_log))  # dédupliqué en gardant l'ordre
-
-        if len(unique_devices) > 1:
-            suspects.append(f"{len(unique_devices)} appareils différents")
-        elif start_dev and end_dev and start_dev != end_dev:
-            suspects.append("appareil différent")
-        if start_ip and end_ip and start_ip != end_ip:
-            suspects.append("IP différente")
-        if duree is not None and duree_min > 0 and duree < duree_min * 0.20:
+        if len(unique_devs) > 1:
+            suspects.append(f"{len(unique_devs)} appareils différents")
+        if nb > 1:
+            suspects.append(f"{nb} sessions")
+        d = r.get("duree_secondes")
+        dm = r.get("duree_minutes",30)*60
+        if d is not None and dm>0 and d < dm*0.20:
             suspects.append("trop rapide")
-        r["unique_devices"] = unique_devices
-
-        r["suspects"]   = suspects
-        r["nb_sessions"] = nb_sessions
-        r["start_device_info"] = start_dev
-        r["start_ip_address"]  = start_ip
+        qc = int(r.get("quit_count") or 0)
+        if qc >= 3:
+            suspects.append(f"quitté {qc}x")
+        r["suspects"] = suspects
 
     return rows
