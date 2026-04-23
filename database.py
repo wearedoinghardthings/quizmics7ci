@@ -403,7 +403,8 @@ def submit_session(session_id, score, records, device_info=None, ip_address=None
                  (session_id, a["question_id"], str(a["reponse"]), int(a["is_correct"])))
 
 def get_results(quiz_id=None):
-    base = """SELECT s.id,a.nom,a.prenom,a.matricule,q.titre AS quiz_titre,q.code AS quiz_code,
+    base = """SELECT s.id,a.id AS agent_id,s.quiz_id,a.nom,a.prenom,a.matricule,
+              q.titre AS quiz_titre,q.code AS quiz_code,
               s.score,s.max_score,s.started_at,s.completed_at
               FROM sessions s JOIN agents a ON s.agent_id=a.id JOIN quizzes q ON s.quiz_id=q.id
               WHERE s.completed=1"""
@@ -438,15 +439,31 @@ def get_stats():
 
 def get_question_stats(quiz_id):
     questions = get_questions(quiz_id)
+    # Nb de soumissions complètes pour ce quiz
+    tot_sess = _fetchone("SELECT COUNT(*) as n FROM sessions WHERE quiz_id=? AND completed=1", (quiz_id,))
+    nb_sessions = int(list(tot_sess.values())[0]) if tot_sess else 0
+
     out = []
     for i, q in enumerate(questions):
         tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
         cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
         t = int(list(tot.values())[0]) if tot else 0
         c = int(list(cor.values())[0]) if cor else 0
-        out.append({"num":i+1,"question_id":q["id"],"texte":q["texte"],"type":q["type"],
-                    "points":q["points"],"total_reponses":t,"bonnes_reponses":c,
-                    "mauvaises_reponses":t-c,"taux_erreur":round(((t-c)/t*100) if t>0 else 0,1)})
+        non_rep = max(0, nb_sessions - t)
+        out.append({
+            "num":               i+1,
+            "question_id":       q["id"],
+            "texte":             q["texte"],
+            "type":              q["type"],
+            "points":            q["points"],
+            "total_reponses":    t,
+            "bonnes_reponses":   c,
+            "mauvaises_reponses":t-c,
+            "non_reponses":      non_rep,
+            "nb_sessions":       nb_sessions,
+            "taux_erreur":       round(((t-c)/t*100) if t>0 else 0, 1),
+            "taux_participation":round((t/nb_sessions*100) if nb_sessions>0 else 0, 1),
+        })
     out.sort(key=lambda x: x["taux_erreur"], reverse=True)
     return out
 
