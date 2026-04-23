@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Mes réponses — QuizAgent CI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#2563EB;--blue-d:#1D4ED8;--blue-x:#1E3A8A;
+  --blue-l:#EFF6FF;--blue-m:#BFDBFE;
+  --green:#059669;--red:#DC2626;--orange:#D97706;
+  --bg:#F0F4FF;--surface:#fff;
+  --border:#E2E8F4;--text:#0F172A;--text2:#475569;--text3:#94A3B8;
+  --shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.05);
+}
+html,body{font-family:'Inter',sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
+.wrap{max-width:600px;margin:0 auto;padding:0 16px 80px}
+
+.header{background:linear-gradient(135deg,var(--blue-x),var(--blue-d));padding:16px 20px;display:flex;align-items:center;gap:12px;margin-bottom:0}
+.header-icon{font-size:1.3rem}
+.header-title{color:#fff;font-size:1rem;font-weight:800}
+
+.agent-bar{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:12px 16px;margin:14px 0 10px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}
+.av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--blue-m),var(--blue-l));color:var(--blue-d);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.av-name{font-weight:700;font-size:.95rem}
+.av-quiz{font-size:.78rem;color:var(--text3);margin-top:2px}
+
+.progress-bar{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.prog-label{font-size:.82rem;color:var(--text2);font-weight:600;margin-bottom:7px}
+.prog-bg{background:#F1F5F9;border-radius:99px;height:8px;overflow:hidden}
+.prog-fill{height:8px;border-radius:99px;transition:width .4s}
+
+.q-card{border-left:4px solid var(--border);border-top:1.5px solid var(--border);border-right:1.5px solid var(--border);border-bottom:1.5px solid var(--border);border-radius:0 12px 12px 0;padding:14px 16px;margin:10px 0;background:#fff;box-shadow:var(--shadow)}
+.q-card.ok{border-left-color:#059669;background:#F0FDF4}
+.q-card.ko{border-left-color:#DC2626;background:#FFF5F5}
+.q-card.skip{border-left-color:#D97706;background:#FFFBEB}
+
+.q-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.q-num{background:var(--blue);color:#fff;font-size:.7rem;font-weight:900;padding:2px 8px;border-radius:99px}
+.q-status{font-size:.8rem;font-weight:700;margin-left:auto}
+.q-status.ok{color:#059669}.q-status.ko{color:#DC2626}.q-status.skip{color:#D97706}
+
+.q-text{font-size:15px;font-weight:600;color:var(--text);margin:0 0 10px;line-height:1.5}
+
+.rep-box{border-radius:8px;padding:8px 12px;font-size:.85rem;margin-top:5px}
+.rep-agent{background:rgba(0,0,0,.04);color:var(--text2)}
+.rep-correct{background:rgba(5,150,105,.08);color:#065F46}
+.rep-label{font-weight:600;margin-right:4px}
+
+.btn{width:100%;padding:14px;font-size:15px;font-family:'Inter',sans-serif;font-weight:700;border:none;border-radius:10px;cursor:pointer;min-height:50px;-webkit-tap-highlight-color:transparent}
+.btn-back{background:#fff;border:2px solid var(--border);color:var(--text)}
+
+.loader{text-align:center;padding:40px;color:var(--text3)}
+.spinner{width:32px;height:32px;border:3px solid var(--blue-m);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-icon">📖</span>
+  <span class="header-title">Mes réponses</span>
+</div>
+
+<div class="wrap">
+  <div id="content">
+    <div class="loader"><div class="spinner"></div>Chargement…</div>
+  </div>
+</div>
+
+<script>
+const SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co";
+const SUPA_KEY = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv";
+
+const headers = {
+  "apikey": SUPA_KEY,
+  "Authorization": "Bearer " + SUPA_KEY,
+  "Content-Type": "application/json"
+};
+
+async function supa(path) {
+  const r = await fetch(SUPA_URL + "/rest/v1/" + path, { headers });
+  if (!r.ok) throw new Error(r.statusText);
+  return r.json();
+}
+
+async function init() {
+  const agent   = JSON.parse(sessionStorage.getItem("qa_agent") || "null");
+  const quiz    = JSON.parse(sessionStorage.getItem("qa_quiz")  || "null");
+  const sid     = sessionStorage.getItem("qa_session_id");
+
+  if (!agent || !quiz || !sid) { window.location.href = "result.html"; return; }
+
+  const content = document.getElementById("content");
+
+  try {
+    // Charger les réponses de l'agent pour cette session
+    const answers = await supa(
+      `answers?session_id=eq.${sid}&select=question_id,reponse,is_correct&order=question_id.asc`
+    );
+
+    // Charger les questions avec options
+    const questions = await supa(
+      `questions?quiz_id=eq.${quiz.id}&order=ordre.asc`
+    );
+
+    // Charger toutes les options du quiz en une seule requête
+    const qIds = questions.map(q => q.id).join(",");
+    const allOpts = qIds ? await supa(`options?question_id=in.(${qIds})&order=question_id.asc,id.asc`) : [];
+    const optsMap = {};
+    allOpts.forEach(o => {
+      if (!optsMap[o.question_id]) optsMap[o.question_id] = [];
+      optsMap[o.question_id].push(o);
+    });
+    questions.forEach(q => { q.options = optsMap[q.id] || []; });
+
+    // Construire un index des réponses par question_id
+    const ansMap = {};
+    answers.forEach(a => { ansMap[a.question_id] = a; });
+
+    const correctN = answers.filter(a => a.is_correct).length;
+    const totalN   = questions.length;
+    const skipN    = questions.filter(q => !ansMap[q.id]).length;
+    const pct      = totalN > 0 ? Math.round(correctN / totalN * 100) : 0;
+    const barCol   = pct >= 70 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+
+    const init_ = (agent.nom[0] + (agent.prenom ? agent.prenom[0] : "")).toUpperCase();
+
+    let html = `
+    <div class="agent-bar">
+      <div class="av">${init_}</div>
+      <div><div class="av-name">${agent.nom} ${agent.prenom || ""}</div>
+      <div class="av-quiz">${quiz.titre}</div></div>
+    </div>
+    <div class="progress-bar">
+      <div class="prog-label">${correctN} bonne(s) / ${totalN} question(s)
+        ${skipN > 0 ? ` &nbsp;·&nbsp; <span style="color:#D97706">${skipN} non répondue(s)</span>` : ""}
+      </div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${pct}%;background:${barCol}"></div></div>
+    </div>`;
+
+    const TYPES = {single:"Choix unique",multiple:"Choix multiple",numeric:"Numérique",text:"Texte libre"};
+
+    questions.forEach((q, i) => {
+      const ans    = ansMap[q.id];
+      const isSkip = !ans;
+      const isOk   = ans && ans.is_correct;
+      const cls    = isSkip ? "skip" : isOk ? "ok" : "ko";
+      const ico    = isSkip ? "⬜ Non répondu" : isOk ? "✅ Correct" : "❌ Incorrect";
+      const icoCls = isSkip ? "skip" : isOk ? "ok" : "ko";
+
+      // Réponse lisible
+      let respTxt = "—";
+      let corTxt  = "";
+      if (!isSkip) {
+        let rp;
+        try { rp = JSON.parse(ans.reponse); } catch(e) { rp = ans.reponse; }
+
+        if (q.type === "single" || q.type === "multiple") {
+          const opts = q.options || [];
+          const rids = Array.isArray(rp) ? rp : (rp ? [rp] : []);
+          respTxt = opts.filter(o => rids.includes(o.id)).map(o => o.texte).join(" / ") || "—";
+          corTxt  = opts.filter(o => o.is_correct).map(o => o.texte).join(" / ");
+        } else if (q.type === "numeric") {
+          respTxt = String(ans.reponse || "—");
+          corTxt  = String(q.reponse_correcte_num ?? "");
+        } else {
+          respTxt = String(ans.reponse || "—");
+          const rc = (q.reponse_correcte_txt || "").trim();
+          corTxt  = rc || "";
+        }
+      }
+
+      html += `
+      <div class="q-card ${cls}">
+        <div class="q-meta">
+          <span class="q-num">Q${i+1}</span>
+          <span style="color:#94A3B8;font-size:.75rem">${TYPES[q.type] || q.type}</span>
+          <span class="q-status ${icoCls}">${ico}</span>
+        </div>
+        <p class="q-text">${q.texte.replace(/\n/g,"<br>")}</p>
+        <div class="rep-box rep-agent">
+          <span class="rep-label">Votre réponse :</span>${isSkip ? "<em style='color:#D97706'>Pas de réponse</em>" : respTxt}
+        </div>
+        ${(!isOk && corTxt) ? `<div class="rep-box rep-correct"><span class="rep-label">Bonne réponse :</span>${corTxt}</div>` : ""}
+      </div>`;
+    });
+
+    html += `<div style="height:16px"></div><button class="btn btn-back" onclick="window.location.href='result.html'">← Retour aux résultats</button>`;
+    content.innerHTML = html;
+
+  } catch(e) {
+    content.innerHTML = `<p style="padding:20px;color:#DC2626">Erreur : ${e.message}</p>
+    <button class="btn btn-back" onclick="window.location.href='result.html'">← Retour</button>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
