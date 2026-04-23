@@ -207,6 +207,7 @@ def init_db():
     _safe_alter("quizzes",  "malus_points",        "REAL DEFAULT 0")
     _safe_alter("quizzes",  "anticheat_actif",     "INTEGER DEFAULT 0")
     _safe_alter("quizzes",  "anticheat_agents",    "TEXT DEFAULT '[]'")
+    _safe_alter("quizzes",  "show_correction",     "INTEGER DEFAULT 0")
 
     release(conn)
 
@@ -328,14 +329,14 @@ def get_all_quizzes():
 def get_quiz(qid):
     return _fetchone("SELECT * FROM quizzes WHERE id=?", (qid,))
 
-def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]"):
+def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
     return _execute(
-        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents))
+        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents,show_correction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction))
 
-def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]"):
-    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=? WHERE id=?",
-         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, qid))
+def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
+    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=?,show_correction=? WHERE id=?",
+         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, qid))
 
 def delete_quiz(qid):
     _run("DELETE FROM quizzes WHERE id=?", (qid,))
@@ -460,6 +461,7 @@ def get_surveillance(quiz_id=None):
                COALESCE(s.start_device_info,'') AS start_device_info,
                COALESCE(s.devices_log,'[]')     AS devices_log,
                COALESCE(s.quit_count,0)         AS quit_count,
+               COALESCE(s.answer_timestamps_json,'{}') AS answer_timestamps_json,
                a.id AS agent_id, s.quiz_id
         FROM sessions s
         JOIN agents a ON s.agent_id=a.id
@@ -506,6 +508,62 @@ def get_surveillance(quiz_id=None):
         qc = int(r.get("quit_count") or 0)
         if qc >= 3:
             suspects.append(f"quitté {qc}x")
-        r["suspects"] = suspects
 
+        # Score suspect : très haut + très rapide
+        pct = (r["score"]/r["max_score"]*100) if r.get("max_score",0)>0 else 0
+        if d is not None and dm>0 and d < dm*0.35 and pct >= 80:
+            suspects.append("score élevé + très rapide")
+
+        r["suspects"] = suspects
+        r["score_pct"] = round(pct,1)
+
+        # Temps moyen par réponse (depuis answer_timestamps_json)
+        try:
+            import json as _j
+            ts = _j.loads(r.get("answer_timestamps_json") or "{}")
+            start_ep = float(r.get("start_time_epoch") or 0)
+            if ts and start_ep:
+                delais = sorted([float(v)-start_ep for v in ts.values() if float(v)>start_ep])
+                if len(delais) > 1:
+                    # Temps entre réponses consécutives
+                    inter = [delais[i]-delais[i-1] for i in range(1,len(delais))]
+                    r["tps_moyen_rep"] = round(sum(inter)/len(inter),1)
+                    r["tps_min_rep"]   = round(min(inter),1)
+                else:
+                    r["tps_moyen_rep"] = None
+                    r["tps_min_rep"]   = None
+            else:
+                r["tps_moyen_rep"] = None
+                r["tps_min_rep"]   = None
+        except Exception:
+            r["tps_moyen_rep"] = None
+            r["tps_min_rep"]   = None
+
+        # Alerte si temps min entre 2 réponses < 3s
+        if r.get("tps_min_rep") is not None and r["tps_min_rep"] < 3:
+            suspects.append(f"réponse en {r['tps_min_rep']}s")
+
+    return rows
+
+
+def get_session_answers(session_id):
+    """Retourne les réponses d'un agent avec les bonnes réponses pour le corrigé."""
+    rows = _fetchall("""
+        SELECT a.question_id, a.reponse, a.is_correct,
+               q.texte, q.type, q.points,
+               q.reponse_correcte_num, q.reponse_correcte_txt,
+               s.quiz_id
+        FROM answers a
+        JOIN questions q ON a.question_id = q.id
+        JOIN sessions s  ON a.session_id  = s.id
+        WHERE a.session_id=?
+        ORDER BY q.ordre
+    """, (session_id,))
+    # Ajouter les options pour single/multiple
+    for r in rows:
+        if r["type"] in ("single","multiple"):
+            r["options"] = _fetchall(
+                "SELECT * FROM options WHERE question_id=? ORDER BY id", (r["question_id"],))
+        else:
+            r["options"] = []
     return rows
