@@ -750,6 +750,10 @@ def render_agent_result():
             f'<div style="color:var(--mu);font-size:.9rem;margin-top:6px">{agent["nom"]} {agent["prenom"]} · {quiz["titre"]}</div></div>',
             unsafe_allow_html=True)
     st.markdown(f'<p style="text-align:center;color:var(--mu);font-size:.82rem;margin:6px 0 14px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>',unsafe_allow_html=True)
+    # Bouton corrigé — uniquement si l'option est activée sur le quiz
+    if quiz.get("show_correction", 0):
+        if st.button("📖  Voir mon corrigé",key="res_corr",type="primary",use_container_width=True):
+            go("agent_correction")
     if st.button("🏠  Retour à l'accueil",key="result_home",use_container_width=True):
         for k in("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score"): st.session_state[k]=_D[k]
         st.session_state.current_agent=None; _save_state(); go("home")
@@ -1160,7 +1164,9 @@ def render_admin_quiz_edit():
         with c1: show_corr=st.checkbox("Permettre aux agents de revoir leur corrigé",value=bool(existing.get("show_correction",0)) if existing else False,help="Un bouton apparaît sur la page résultat — sans afficher le score")
         with c2: st.markdown("")
         st.markdown("**🔒 Anti-quitter**")
-        anticheat=st.checkbox("Soumettre automatiquement si l'agent quitte l'écran (3 sorties max)",value=bool(existing.get("anticheat_actif",0)) if existing else False)
+        c1_ac,c2_ac=st.columns([3,1])
+        with c1_ac: anticheat=st.checkbox("Soumettre automatiquement si l'agent quitte l'écran",value=bool(existing.get("anticheat_actif",0)) if existing else False)
+        with c2_ac: anticheat_max=st.number_input("Nb sorties max",min_value=1,max_value=10,value=int(existing.get("anticheat_max",3) or 3) if existing else 3,disabled=not anticheat,key="ac_max_inp")
         if anticheat:
             all_ag=get_all_agents()
             try: ac_list=json.loads(existing.get("anticheat_agents","[]") or "[]") if existing else []
@@ -1179,11 +1185,11 @@ def render_admin_quiz_edit():
                 ac_json=json.dumps(sel_ag)
                 if is_new:
                     try:
-                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr))
+                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr),int(anticheat_max))
                         st.session_state.edit_quiz_id=nid; st.success("Quiz créé !"); st.rerun()
                     except Exception as e: st.error(f"Erreur (code déjà existant ?) : {e}")
                 else:
-                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr)); st.success("Quiz mis à jour."); st.rerun()
+                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr),int(anticheat_max)); st.success("Quiz mis à jour."); st.rerun()
     st.markdown('</div>',unsafe_allow_html=True)
 
     cur_id=st.session_state.edit_quiz_id
