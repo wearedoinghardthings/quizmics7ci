@@ -208,6 +208,7 @@ def init_db():
     _safe_alter("quizzes",  "anticheat_actif",     "INTEGER DEFAULT 0")
     _safe_alter("quizzes",  "anticheat_agents",    "TEXT DEFAULT '[]'")
     _safe_alter("quizzes",  "show_correction",     "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "anticheat_max",       "INTEGER DEFAULT 3")
 
     release(conn)
 
@@ -329,14 +330,14 @@ def get_all_quizzes():
 def get_quiz(qid):
     return _fetchone("SELECT * FROM quizzes WHERE id=?", (qid,))
 
-def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
+def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0, anticheat_max=3):
     return _execute(
-        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents,show_correction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction))
+        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents,show_correction,anticheat_max) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, anticheat_max))
 
-def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
-    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=?,show_correction=? WHERE id=?",
-         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, qid))
+def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0, anticheat_max=3):
+    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=?,show_correction=?,anticheat_max=? WHERE id=?",
+         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, anticheat_max, qid))
 
 def delete_quiz(qid):
     _run("DELETE FROM quizzes WHERE id=?", (qid,))
@@ -403,8 +404,7 @@ def submit_session(session_id, score, records, device_info=None, ip_address=None
                  (session_id, a["question_id"], str(a["reponse"]), int(a["is_correct"])))
 
 def get_results(quiz_id=None):
-    base = """SELECT s.id,a.id AS agent_id,s.quiz_id,a.nom,a.prenom,a.matricule,
-              q.titre AS quiz_titre,q.code AS quiz_code,
+    base = """SELECT s.id,a.nom,a.prenom,a.matricule,q.titre AS quiz_titre,q.code AS quiz_code,
               s.score,s.max_score,s.started_at,s.completed_at
               FROM sessions s JOIN agents a ON s.agent_id=a.id JOIN quizzes q ON s.quiz_id=q.id
               WHERE s.completed=1"""
@@ -439,31 +439,15 @@ def get_stats():
 
 def get_question_stats(quiz_id):
     questions = get_questions(quiz_id)
-    # Nb de soumissions complètes pour ce quiz
-    tot_sess = _fetchone("SELECT COUNT(*) as n FROM sessions WHERE quiz_id=? AND completed=1", (quiz_id,))
-    nb_sessions = int(list(tot_sess.values())[0]) if tot_sess else 0
-
     out = []
     for i, q in enumerate(questions):
         tot = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=?", (q["id"],))
         cor = _fetchone("SELECT COUNT(*) as n FROM answers WHERE question_id=? AND is_correct=1", (q["id"],))
         t = int(list(tot.values())[0]) if tot else 0
         c = int(list(cor.values())[0]) if cor else 0
-        non_rep = max(0, nb_sessions - t)
-        out.append({
-            "num":               i+1,
-            "question_id":       q["id"],
-            "texte":             q["texte"],
-            "type":              q["type"],
-            "points":            q["points"],
-            "total_reponses":    t,
-            "bonnes_reponses":   c,
-            "mauvaises_reponses":t-c,
-            "non_reponses":      non_rep,
-            "nb_sessions":       nb_sessions,
-            "taux_erreur":       round(((t-c)/t*100) if t>0 else 0, 1),
-            "taux_participation":round((t/nb_sessions*100) if nb_sessions>0 else 0, 1),
-        })
+        out.append({"num":i+1,"question_id":q["id"],"texte":q["texte"],"type":q["type"],
+                    "points":q["points"],"total_reponses":t,"bonnes_reponses":c,
+                    "mauvaises_reponses":t-c,"taux_erreur":round(((t-c)/t*100) if t>0 else 0,1)})
     out.sort(key=lambda x: x["taux_erreur"], reverse=True)
     return out
 
