@@ -21,6 +21,20 @@ from database import (
     get_session_answers,
 )
 
+import re as _re
+
+def _fmt(t):
+    """Formate : **gras** *italique* [rouge/bleu/vert/orange]...[/] newline=<br>"""
+    t = str(t)
+    t = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', t)
+    t = _re.sub(r'\*([^*]+?)\*',  r'<i>\1</i>', t)
+    t = _re.sub(r'\[rouge\](.+?)\[/rouge\]',   r'<b style="color:#DC2626">\1</b>', t)
+    t = _re.sub(r'\[bleu\](.+?)\[/bleu\]',     r'<b style="color:#1D4ED8">\1</b>', t)
+    t = _re.sub(r'\[vert\](.+?)\[/vert\]',     r'<b style="color:#059669">\1</b>', t)
+    t = _re.sub(r'\[orange\](.+?)\[/orange\]', r'<b style="color:#D97706">\1</b>', t)
+    t = t.replace('\n', '<br>')
+    return t
+
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
                    layout="centered", initial_sidebar_state="collapsed")
 
@@ -78,9 +92,8 @@ html,body,[class*="css"],input,textarea,button,select,.stMarkdown p,label{font-f
 .qmeta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .qnum{background:var(--Bl);color:var(--B);font-size:.72rem;font-weight:800;padding:2px 8px;border-radius:99px}
 .qtype{color:var(--mu);font-size:.75rem;font-weight:500}.qpts{background:#F1F5F9;color:var(--mu);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:auto}
-.qtxt{font-size:15px;font-weight:600;color:var(--txt);margin:0 0 10px;line-height:1.45}
+.qtxt{font-size:15px;font-weight:400;color:var(--txt);margin:0 0 10px;line-height:1.5}
 .qtxt b{font-weight:800}
-.qtxt span{color:inherit!important}
 .qtxt [style*="color:#DC2626"]{color:#DC2626!important}
 .qtxt [style*="color:#1D4ED8"]{color:#1D4ED8!important}
 .qtxt [style*="color:#059669"]{color:#059669!important}
@@ -675,7 +688,7 @@ def render_agent_quiz():
             f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
             f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
             f'<span class="qpts">{pts}</span></div>'
-            f'<p class="qtxt">{q["texte"]}</p></div>', unsafe_allow_html=True)
+            f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
 
         if q["type"]=="single":
             opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
@@ -750,6 +763,9 @@ def render_agent_result():
             f'<div style="color:var(--mu);font-size:.9rem;margin-top:6px">{agent["nom"]} {agent["prenom"]} · {quiz["titre"]}</div></div>',
             unsafe_allow_html=True)
     st.markdown(f'<p style="text-align:center;color:var(--mu);font-size:.82rem;margin:6px 0 14px">Soumis le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>',unsafe_allow_html=True)
+    if quiz.get("show_correction", 0):
+        if st.button("📖  Voir mon corrigé",key="res_corr",type="primary",use_container_width=True):
+            go("agent_correction")
     if st.button("🏠  Retour à l'accueil",key="result_home",use_container_width=True):
         for k in("current_quiz","quiz_questions","quiz_start_time","quiz_answers","session_id","quiz_submitted","final_score"): st.session_state[k]=_D[k]
         st.session_state.current_agent=None; _save_state(); go("home")
@@ -996,28 +1012,123 @@ def _tab_quizzes():
 # ── Résultats ─────────────────────────────────────────────────
 
 def _tab_results():
-    quizzes=get_all_quizzes()
-    opts={0:"— Tous les quiz —"}; opts.update({q["id"]:f"{q['titre']} ({q['code']})" for q in quizzes})
-    sel=st.selectbox("Quiz",list(opts.keys()),format_func=lambda x:opts[x],label_visibility="collapsed")
-    results=get_results(sel if sel else None)
-    if not results: st.info("Aucun résultat disponible."); return
-    df=pd.DataFrame(results)
-    df["pct"]=(df["score"]/df["max_score"]*100).round(1); df["agent"]=df["nom"]+" "+df["prenom"]
-    disp=df[["agent","matricule","quiz_titre","score","max_score","pct","completed_at"]].copy()
-    disp.columns=["Agent","Matricule","Quiz","Score","Sur","%","Date"]
-    st.dataframe(disp,use_container_width=True)
-    buf=io.BytesIO()
-    with pd.ExcelWriter(buf,engine="openpyxl") as w:
-        disp.to_excel(w,index=False,sheet_name="Résultats")
-        ws=w.sheets["Résultats"]
-        for col in ws.columns:
-            ml=max((len(str(c.value)) for c in col if c.value),default=10)
-            ws.column_dimensions[col[0].column_letter].width=min(ml+4,40)
-    buf.seek(0)
-    st.download_button("📥  Télécharger Excel",data=buf.getvalue(),
-                        file_name=f"resultats_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
+    quizzes = get_all_quizzes()
+    opts = {0: "— Tous les quiz —"}
+    opts.update({q["id"]: f"{q['titre']} ({q['code']})" for q in quizzes})
+    sel = st.selectbox("Quiz", list(opts.keys()), format_func=lambda x: opts[x],
+                       label_visibility="collapsed", key="res_sel")
+    results = get_results(sel if sel else None)
+    if not results:
+        st.info("Aucun résultat disponible."); return
+
+    # ── Tableau résumé ──
+    df = pd.DataFrame(results)
+    df["pct"] = (df["score"] / df["max_score"] * 100).round(1)
+    df["agent"] = df["nom"] + " " + df["prenom"]
+    disp = df[["agent","matricule","quiz_titre","score","max_score","pct","completed_at"]].copy()
+    disp.columns = ["Agent","Matricule","Quiz","Score","Sur","%","Date"]
+    st.dataframe(disp, use_container_width=True)
+
+    # ── Export choix ──
+    mode = st.radio("Export", ["Résumé uniquement", "Avec réponses par question"],
+                    horizontal=True, key="res_export_mode")
+
+    if mode == "Résumé uniquement":
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as w:
+            disp.to_excel(w, index=False, sheet_name="Résultats")
+            ws = w.sheets["Résultats"]
+            from openpyxl.styles import PatternFill, Font
+            for row in ws.iter_rows(min_row=2):
+                pct_val = row[5].value or 0
+                if pct_val >= 70: row[5].font = Font(color="059669", bold=True)
+                elif pct_val < 40: row[5].font = Font(color="DC2626", bold=True)
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = min(
+                    max(len(str(c.value or ""))+4 for c in col), 40)
+        buf.seek(0)
+        st.download_button("📥 Télécharger Excel (résumé)",
+            data=buf.getvalue(),
+            file_name=f"resultats_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, key="dl_res_summary")
+
+    else:
+        # Export détaillé : une ligne par question par agent
+        if st.button("🔄 Générer l'export détaillé", key="gen_detail", type="primary", use_container_width=True):
+            with st.spinner("Collecte des réponses en cours…"):
+                rows_detail = []
+                for r in results:
+                    sid = r.get("id")
+                    if not sid: continue
+                    answers = get_session_answers(sid)
+                    pct = round(r["score"]/r["max_score"]*100, 1) if r.get("max_score",0)>0 else 0
+                    for a in answers:
+                        # Réponse lisible
+                        resp_raw = a.get("reponse","")
+                        try:
+                            import json as _j; rp = _j.loads(resp_raw)
+                        except: rp = resp_raw
+                        if a["type"] in ("single","multiple"):
+                            opts_q = a.get("options",[])
+                            rids = rp if isinstance(rp,list) else ([rp] if rp else [])
+                            resp_txt = " / ".join(o["texte"] for o in opts_q if o["id"] in rids) or "—"
+                            cor_txt  = " / ".join(o["texte"] for o in opts_q if o["is_correct"])
+                        elif a["type"] == "numeric":
+                            resp_txt = str(resp_raw) if str(resp_raw).strip() else "—"
+                            cor_txt  = str(a.get("reponse_correcte_num",""))
+                        else:
+                            resp_txt = str(resp_raw) if str(resp_raw).strip() else "—"
+                            cor_txt  = (a.get("reponse_correcte_txt") or "Question ouverte")
+
+                        rows_detail.append({
+                            "Agent":        f"{r['nom']} {r['prenom']}",
+                            "Matricule":    r.get("matricule",""),
+                            "Quiz":         r.get("quiz_titre",""),
+                            "Score total":  r["score"],
+                            "Sur":          r["max_score"],
+                            "% total":      pct,
+                            "Q N°":         a.get("num", ""),
+                            "Question":     _strip_html(a["texte"])[:100],
+                            "Type":         a["type"],
+                            "Pts question": a["points"],
+                            "Réponse agent":resp_txt,
+                            "Bonne réponse":cor_txt,
+                            "Correct":      "✅" if a["is_correct"] else "❌",
+                            "Date":         r.get("completed_at",""),
+                        })
+
+                if not rows_detail:
+                    st.warning("Aucune réponse détaillée disponible."); return
+
+                df_det = pd.DataFrame(rows_detail)
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    # Feuille résumé
+                    disp.to_excel(w, index=False, sheet_name="Résumé")
+                    # Feuille détail
+                    df_det.to_excel(w, index=False, sheet_name="Réponses détaillées")
+                    from openpyxl.styles import PatternFill, Font
+                    for sheet_name in ["Résumé", "Réponses détaillées"]:
+                        ws = w.sheets[sheet_name]
+                        for col in ws.columns:
+                            ws.column_dimensions[col[0].column_letter].width = min(
+                                max(len(str(c.value or ""))+4 for c in col), 50)
+                    # Colorier la feuille détail
+                    ws2 = w.sheets["Réponses détaillées"]
+                    for row in ws2.iter_rows(min_row=2):
+                        cor_cell = row[12]  # colonne Correct
+                        if cor_cell.value == "✅":
+                            for cell in row: cell.fill = PatternFill("solid", fgColor="D1FAE5")
+                        elif cor_cell.value == "❌":
+                            for cell in row: cell.fill = PatternFill("solid", fgColor="FEE2E2")
+                buf.seek(0)
+                st.success(f"✅ {len(rows_detail)} lignes générées")
+                st.download_button("📥 Télécharger Excel (détaillé)",
+                    data=buf.getvalue(),
+                    file_name=f"resultats_detail_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="dl_res_detail")
 
 
 # ── Stats par question ─────────────────────────────────────────
