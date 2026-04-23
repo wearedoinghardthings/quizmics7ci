@@ -102,15 +102,23 @@ if (show_score) {
   </div>`;
 }
 
-html += `
-<p class="time-stamp">Soumis le ${now}</p>
-<button class="btn btn-primary" onclick="goHome()">🏠  Retour à l'accueil</button>`;
+html += `<p class="time-stamp">Soumis le ${now}</p>`;
+
+// Bouton corrigé — uniquement si l'admin l'a activé sur ce quiz
+if (result.show_correction) {
+  html += `<button class="btn btn-primary" style="margin-bottom:10px" onclick="voirCorrige()">📖  Voir mes réponses</button>`;
+}
+html += `<button class="btn" style="background:#fff;border:2px solid #E2E8F4;color:#0F172A;margin-top:4px" onclick="goHome()">🏠  Retour à l'accueil</button>`;
 
 document.getElementById("result-content").innerHTML = html;
 
 function goHome() {
   sessionStorage.clear();
   window.location.href = "index.html";
+}
+
+function voirCorrige() {
+  window.location.href = "correction.html";
 }
 </script>
 </body>
