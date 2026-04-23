@@ -1285,6 +1285,8 @@ def _tab_surveillance():
         st.success("Aucun cas suspect detecte."); return
 
     for r in rows:
+        # Ajouter quit_count dans les badges
+        quit_c = int(r.get("quit_count") or 0)
         is_suspect = bool(r.get("suspects"))
         border = "#DC2626" if is_suspect else "#E2E8F4"
         bg     = "#FFF5F5" if is_suspect else "#FFFFFF"
@@ -1349,6 +1351,7 @@ def _tab_surveillance():
         "Appareil":    r.get("device_info",""),
         "IP":          r.get("ip_address",""),
         "Nb sessions": r.get("nb_sessions",1),
+        "Fois quitté": int(r.get("quit_count") or 0),
         "Suspect":     ", ".join(r.get("suspects",[]) or []) or "Non",
         "Appareil debut": r.get("start_device_info",""),
         "Appareil fin":   r.get("device_info",""),

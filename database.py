@@ -202,6 +202,11 @@ def init_db():
     _safe_alter("sessions", "start_device_info",      "TEXT DEFAULT ''")
     _safe_alter("sessions", "start_ip_address",       "TEXT DEFAULT ''")
     _safe_alter("sessions", "devices_log",            "TEXT DEFAULT '[]'")
+    _safe_alter("sessions", "quit_count",             "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "malus_actif",            "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "malus_points",           "REAL DEFAULT 0")
+    _safe_alter("quizzes",  "anticheat_actif",        "INTEGER DEFAULT 0")
+    _safe_alter("quizzes",  "anticheat_agents",       "TEXT DEFAULT '[]'")
 
     release(conn)
 
@@ -397,13 +402,16 @@ def get_incomplete_session(agent_id, quiz_id):
         "SELECT * FROM sessions WHERE agent_id=? AND quiz_id=? AND completed=0 ORDER BY started_at DESC LIMIT 1",
         (agent_id, quiz_id))
 
-def submit_session(session_id, score, records, device_info=None, ip_address=None, answer_timestamps_json=None):
-    if device_info or ip_address or answer_timestamps_json:
-        _run("UPDATE sessions SET score=?,completed=1,completed_at=?,device_info=?,ip_address=?,answer_timestamps_json=? WHERE id=?",
-             (score, datetime.now().isoformat(), device_info or "", ip_address or "", answer_timestamps_json or "{}", session_id))
-    else:
-        _run("UPDATE sessions SET score=?,completed=1,completed_at=? WHERE id=?",
-             (score, datetime.now().isoformat(), session_id))
+def submit_session(session_id, score, records, device_info=None, ip_address=None, answer_timestamps_json=None, quit_count=None):
+    extra_sets = []
+    extra_vals = []
+    if device_info is not None:            extra_sets.append("device_info=?");            extra_vals.append(device_info)
+    if ip_address is not None:             extra_sets.append("ip_address=?");             extra_vals.append(ip_address)
+    if answer_timestamps_json is not None: extra_sets.append("answer_timestamps_json=?"); extra_vals.append(answer_timestamps_json)
+    if quit_count is not None:             extra_sets.append("quit_count=?");             extra_vals.append(quit_count)
+    extras = (","+",".join(extra_sets)) if extra_sets else ""
+    _run(f"UPDATE sessions SET score=?,completed=1,completed_at=?{extras} WHERE id=?",
+         tuple([score, datetime.now().isoformat()] + extra_vals + [session_id]))
     for a in records:
         _execute("INSERT INTO answers (session_id,question_id,reponse,is_correct) VALUES (?,?,?,?)",
                  (session_id, a["question_id"], str(a["reponse"]), int(a["is_correct"])))
@@ -510,6 +518,7 @@ def get_surveillance(quiz_id=None):
             COALESCE(s.start_device_info,'')  AS start_device_info,
             COALESCE(s.start_ip_address,'')   AS start_ip_address,
             COALESCE(s.devices_log,'[]')       AS devices_log,
+            COALESCE(s.quit_count,0)           AS quit_count,
             a.id AS agent_id, s.quiz_id
         FROM sessions s
         JOIN agents a ON s.agent_id = a.id
