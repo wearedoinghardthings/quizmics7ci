@@ -281,39 +281,41 @@ async function init() {
     // ── Anti-quitter ──
     if (window.ANTICHEAT) {
       window._quitCount = 0;
-      window._quitMax   = 3; // soumission automatique après 3 sorties
+      window._quitMax   = parseInt(quiz.anticheat_max || 3);
+      window._lastQuit  = 0; // timestamp dernière sortie (cooldown 3s)
 
-      // Afficher bannière d'avertissement
       const banner = document.createElement("div");
       banner.id = "anticheat-banner";
       banner.style.cssText = "position:fixed;bottom:80px;left:16px;right:16px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:10px;padding:10px 14px;font-size:.8rem;font-weight:600;color:#92400E;z-index:99998;text-align:center";
-      banner.innerHTML = "🔒 Mode surveillé — quitter cet écran entraîne la soumission automatique";
+      banner.innerHTML = "🔒 Mode surveillé — quitter cet écran " + window._quitMax + " fois entraîne la soumission automatique";
       document.body.appendChild(banner);
 
-      function _onQuit() {
-        if (document.hidden || !document.hasFocus()) {
-          window._quitCount++;
-          // Mettre à jour quit_count en base immédiatement
-          supa(`sessions?id=eq.${sessionId}`, {
-            method: "PATCH",
-            body: { quit_count: window._quitCount }
-          }).catch(() => {});
-          // Avertissement visuel
+      // Utiliser UNIQUEMENT visibilitychange (pas blur qui est trop sensible sur mobile)
+      // + cooldown 3 secondes pour éviter les faux positifs
+      document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) return; // ignorer le retour sur la page
+        const now = Date.now();
+        if (now - window._lastQuit < 3000) return; // cooldown 3s
+        window._lastQuit = now;
+        window._quitCount++;
+
+        supa(`sessions?id=eq.${sessionId}`, {
+          method: "PATCH",
+          body: { quit_count: window._quitCount }
+        }).catch(() => {});
+
+        const remaining = window._quitMax - window._quitCount;
+        if (remaining > 0) {
           banner.style.background = "#FEE2E2";
           banner.style.borderColor = "#FCA5A5";
           banner.style.color = "#991B1B";
-          const remaining = window._quitMax - window._quitCount;
-          banner.innerHTML = remaining > 0
-            ? `⚠️ Sortie détectée (${window._quitCount}/${window._quitMax}) — encore ${remaining} avant soumission automatique`
-            : "🚨 Soumission automatique en cours…";
-          if (window._quitCount >= window._quitMax) {
-            clearInterval(autoSaveInterval);
-            setTimeout(() => submitQuiz(true), 1500);
-          }
+          banner.innerHTML = `⚠️ Sortie ${window._quitCount}/${window._quitMax} — encore ${remaining} avant soumission automatique`;
+        } else {
+          banner.innerHTML = "🚨 Soumission automatique en cours…";
+          clearInterval(autoSaveInterval);
+          setTimeout(() => submitQuiz(true), 1500);
         }
-      }
-      document.addEventListener("visibilitychange", _onQuit);
-      window.addEventListener("blur", _onQuit);
+      });
     }
 
   } catch(e) {
