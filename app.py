@@ -18,6 +18,7 @@ from database import (
     submit_session, get_results, session_already_completed, get_stats,
     get_question_stats,
     get_surveillance,
+    get_session_answers,
 )
 
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
@@ -612,6 +613,7 @@ def _submit():
     submit_session(st.session_state.session_id,score,records)
     st.session_state.final_score={"score":score,"max_score":sum(q["points"] for q in ql)}
     st.session_state.quiz_submitted=True
+    st.session_state.result_session_id=st.session_state.session_id
 
 
 def render_agent_quiz():
@@ -1154,6 +1156,9 @@ def render_admin_quiz_edit():
         with c1: malus_actif=st.checkbox("Activer les malus",value=bool(existing.get("malus_actif",0)) if existing else False,help="Mauvaise réponse = perte de points. Rien coché = 0 pt.")
         with c2: malus_pts=st.number_input("Points perdus / mauvaise réponse",min_value=0.0,max_value=10.0,step=0.5,value=float(existing.get("malus_points",0) or 0) if existing else 0.0,disabled=not malus_actif)
 
+        c1,c2=st.columns(2)
+        with c1: show_corr=st.checkbox("Permettre aux agents de revoir leur corrigé",value=bool(existing.get("show_correction",0)) if existing else False,help="Un bouton apparaît sur la page résultat — sans afficher le score")
+        with c2: st.markdown("")
         st.markdown("**🔒 Anti-quitter**")
         anticheat=st.checkbox("Soumettre automatiquement si l'agent quitte l'écran (3 sorties max)",value=bool(existing.get("anticheat_actif",0)) if existing else False)
         if anticheat:
@@ -1174,11 +1179,11 @@ def render_admin_quiz_edit():
                 ac_json=json.dumps(sel_ag)
                 if is_new:
                     try:
-                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json)
+                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr))
                         st.session_state.edit_quiz_id=nid; st.success("Quiz créé !"); st.rerun()
                     except Exception as e: st.error(f"Erreur (code déjà existant ?) : {e}")
                 else:
-                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json); st.success("Quiz mis à jour."); st.rerun()
+                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr)); st.success("Quiz mis à jour."); st.rerun()
     st.markdown('</div>',unsafe_allow_html=True)
 
     cur_id=st.session_state.edit_quiz_id
@@ -1286,73 +1291,130 @@ def _tab_surveillance():
     data=get_surveillance(sel if sel else None)
     if not data: st.info("Aucune soumission."); return
 
-    suspects=[r for r in data if r.get("suspects")]
-    appareils_susp=len([r for r in data if len(r.get("unique_devices") or [])>1])
-    c1,c2,c3=st.columns(3)
-    c1.metric("Soumissions",len(data))
-    c2.metric("Cas suspects",len(suspects),delta="fraude potentielle" if suspects else None,delta_color="inverse")
-    c3.metric("Appareils suspects",appareils_susp,delta="changement détecté" if appareils_susp else None,delta_color="inverse")
+    suspects     = [r for r in data if r.get("suspects")]
+    app_susp     = len([r for r in data if len(r.get("unique_devices") or [])>1])
+    quit_susp    = len([r for r in data if int(r.get("quit_count") or 0)>=3])
+    vitesse_susp = len([r for r in data if "trop rapide" in " ".join(r.get("suspects") or []) or "réponse en" in " ".join(r.get("suspects") or [])])
+
+    # ── KPI ──
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("📋 Soumissions",     len(data))
+    c2.metric("⚠️ Cas suspects",    len(suspects),  delta=f"{len(suspects)} à vérifier" if suspects else None, delta_color="inverse")
+    c3.metric("📱 Appareils susp.", app_susp,       delta="changement d'appareil" if app_susp else None, delta_color="inverse")
+    c4.metric("⚡ Vitesse susp.",   vitesse_susp,   delta="trop rapide" if vitesse_susp else None, delta_color="inverse")
+
+    # ── Résumé distribution scores ──
+    if data:
+        scores = [r["score_pct"] for r in data]
+        avg_s  = round(sum(scores)/len(scores),1)
+        above80= sum(1 for s in scores if s>=80)
+        below30= sum(1 for s in scores if s<30)
+        st.markdown(
+            f'<div style="background:#F8FAFF;border:1.5px solid #E2E8F4;border-radius:10px;padding:11px 16px;margin:10px 0;font-size:.82rem;color:#475569">' +
+            f'📈 Score moyen : <b style="color:#1D4ED8">{avg_s}%</b> &nbsp;·&nbsp; ' +
+            f'🏆 ≥80% : <b style="color:#059669">{above80}</b> &nbsp;·&nbsp; ' +
+            f'📉 <30% : <b style="color:#DC2626">{below30}</b> &nbsp;·&nbsp; ' +
+            f'🚪 Quitté ≥3x : <b style="color:#D97706">{quit_susp}</b></div>',
+            unsafe_allow_html=True)
 
     st.markdown("---")
     only_s=st.checkbox("Cas suspects uniquement",key="surv_filter")
     rows=suspects if only_s else data
-    if only_s and not rows: st.success("✅ Aucun cas suspect."); return
+    if only_s and not rows: st.success("✅ Aucun cas suspect détecté."); return
 
     for r in rows:
-        is_s=bool(r.get("suspects"))
-        border="#DC2626" if is_s else "#E2E8F4"
-        bg="#FFF5F5" if is_s else "#FFFFFF"
-        pct=round(r["score"]/r["max_score"]*100,1) if r.get("max_score",0)>0 else 0
-        sc="#059669" if pct>=70 else("#D97706" if pct>=50 else "#DC2626")
-        init=(r["nom"][0]+(r["prenom"][0] if r.get("prenom") else "")).upper()
-        duree=r.get("duree_affichee","—")
-        quit_c=int(r.get("quit_count") or 0)
+        is_s   = bool(r.get("suspects"))
+        border = "#DC2626" if is_s else "#E2E8F4"
+        bg     = "#FFF5F5" if is_s else "#FFFFFF"
+        pct    = r.get("score_pct",0)
+        sc     = "#059669" if pct>=70 else("#D97706" if pct>=50 else "#DC2626")
+        init   = (r["nom"][0]+(r["prenom"][0] if r.get("prenom") else "")).upper()
+        duree  = r.get("duree_affichee","—")
+        quit_c = int(r.get("quit_count") or 0)
+        tps_m  = r.get("tps_moyen_rep")
+        tps_mn = r.get("tps_min_rep")
 
+        # Badges suspects
         badges=""
         for s in (r.get("suspects") or []):
-            if "rapide" in s:   badges+=f'<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">⚡ {s}</span>'
-            elif "quitté" in s: badges+=f'<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">🚪 {s}</span>'
-            else:               badges+=f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">⚠️ {s}</span>'
-        if quit_c>0 and f"quitté {quit_c}x" not in " ".join(r.get("suspects") or []):
+            if "appareils" in s:    badges+=f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">📱 {s}</span>'
+            elif "rapide" in s:     badges+=f'<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">⚡ {s}</span>'
+            elif "quitté" in s:     badges+=f'<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">🚪 {s}</span>'
+            elif "score élevé" in s:badges+=f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">🎯 {s}</span>'
+            elif "réponse en" in s: badges+=f'<span style="background:#FEF3C7;color:#D97706;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">⚡ {s}</span>'
+            elif "sessions" in s:   badges+=f'<span style="background:#FEE2E2;color:#DC2626;font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">⚠️ {s}</span>'
+
+        # Badge quit (si pas déjà dans suspects)
+        if quit_c>0 and not any("quitté" in s for s in (r.get("suspects") or [])):
             qcol="#DC2626" if quit_c>=3 else "#D97706"
             badges+=f'<span style="background:#FFF7ED;color:{qcol};font-size:.7rem;font-weight:800;padding:2px 8px;border-radius:99px;margin-right:4px">🚪 Quitté {quit_c}x</span>'
 
+        # Appareils
         unique_devs=r.get("unique_devices") or []
         if len(unique_devs)>1:
-            devs_str="".join(f'<div style="color:#64748B;margin-top:1px;font-size:.73rem">• {d[:55]}</div>' for d in unique_devs)
-            dev_html=f'<div style="background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;padding:7px 10px;margin-top:6px;font-size:.75rem"><b style="color:#DC2626">⚠️ {len(unique_devs)} appareils différents ont composé cette session</b>{devs_str}</div>'
+            devs_str="".join(f'<div style="color:#64748B;font-size:.72rem;margin-top:2px">• {d[:55]}</div>' for d in unique_devs)
+            dev_html=f'<div style="background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;padding:7px 10px;margin-top:6px"><b style="color:#DC2626;font-size:.78rem">⚠️ {len(unique_devs)} appareils différents ont composé cette session</b>{devs_str}</div>'
         elif r.get("device_info"):
-            dev_html=f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">📱 {r["device_info"][:45]}</span>'
+            dev_html=f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px">📱 {r["device_info"][:40]}</span>'
         else:
             dev_html=""
 
+        # Timing
+        tps_html=""
+        if tps_m is not None:
+            tps_fmt = f"{int(tps_m)//60}m{int(tps_m)%60:02d}s" if tps_m>=60 else f"{tps_m}s"
+            tps_mn_fmt = f"{tps_mn}s" if tps_mn is not None else "—"
+            tcol = "#DC2626" if (tps_mn is not None and tps_mn<3) else "#7C3AED"
+            tps_html=f'<span style="background:#EDE9FE;color:{tcol};font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:4px">⏱ Moy:{tps_fmt} Min:{tps_mn_fmt}</span>'
+
         ip_html=f'<span style="background:#F1F5F9;color:#475569;font-size:.7rem;padding:2px 8px;border-radius:99px;margin-left:4px">🌐 {r["ip_address"]}</span>' if r.get("ip_address") else ""
+
+        # Barre de durée
+        dm2 = r.get("duree_minutes",30)*60
+        ds2 = r.get("duree_secondes")
+        pct_t = min(100,round(ds2/dm2*100)) if ds2 and dm2 else 0
+        bar_col = "#059669" if pct_t>40 else("#D97706" if pct_t>20 else "#DC2626")
+        dur_bar = f'<div style="background:#F1F5F9;border-radius:99px;height:5px;margin:5px 0 2px"><div style="width:{pct_t}%;height:5px;background:{bar_col};border-radius:99px"></div></div>' if ds2 else ""
 
         st.markdown(
             f'<div style="background:{bg};border:1.5px solid {border};border-radius:12px;padding:14px 16px;margin:6px 0">'+
             f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:7px">'+
             f'<div style="width:36px;height:36px;border-radius:50%;background:#DBEAFE;color:#1D4ED8;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0">{init}</div>'+
-            f'<div style="flex:1"><div style="font-weight:700;font-size:14px">{r["nom"]} {r.get("prenom","")}</div>'+
-            f'<div style="font-size:.77rem;color:#64748B">{r.get("quiz_titre","")}</div></div>'+
+            f'<div style="flex:1"><div style="font-weight:700;font-size:14px">{r["nom"]} {r.get("prenom","")}'+
+            (f' <span style="color:#94A3B8;font-size:.78rem">({r["matricule"]})</span>' if r.get("matricule") else "")+
+            f'</div><div style="font-size:.77rem;color:#64748B">{r.get("quiz_titre","")}</div></div>'+
             f'<div style="text-align:right;flex-shrink:0"><div style="font-size:1.05rem;font-weight:900;color:{sc}">{pct}%</div>'+
             f'<div style="font-size:.7rem;color:#94A3B8">{duree}</div></div></div>'+
-            f'<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">{badges}{ip_html}</div>'+
+            f'{dur_bar}'+
+            f'<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px">{badges}{tps_html}{ip_html}</div>'+
             f'{dev_html}</div>',
             unsafe_allow_html=True)
 
+    # ── Export Excel ──
     st.markdown("---")
-    df=pd.DataFrame([{"Agent":f"{r['nom']} {r.get('prenom','')}","Matricule":r.get("matricule",""),
-        "Quiz":r.get("quiz_titre",""),"Score (%)":round(r["score"]/r["max_score"]*100,1) if r.get("max_score",0)>0 else 0,
-        "Durée":r.get("duree_affichee","—"),"Appareils":len(r.get("unique_devices") or []),
-        "Quitté (x)":int(r.get("quit_count") or 0),"Suspect":", ".join(r.get("suspects") or []) or "Non",
-        "Soumis le":r.get("completed_at","")} for r in rows])
+    df=pd.DataFrame([{
+        "Agent":          f"{r['nom']} {r.get('prenom','')}",
+        "Matricule":      r.get("matricule",""),
+        "Quiz":           r.get("quiz_titre",""),
+        "Score (%)":      r.get("score_pct",0),
+        "Durée":          r.get("duree_affichee","—"),
+        "Nb appareils":   len(r.get("unique_devices") or []),
+        "Appareils":      " | ".join(r.get("unique_devices") or []),
+        "IP":             r.get("ip_address","—"),
+        "Quitté (x)":     int(r.get("quit_count") or 0),
+        "Tps moy/rép":    f"{r['tps_moyen_rep']}s" if r.get("tps_moyen_rep") else "—",
+        "Tps min/rép":    f"{r['tps_min_rep']}s"   if r.get("tps_min_rep")   else "—",
+        "Suspect":        ", ".join(r.get("suspects") or []) or "Non",
+        "Soumis le":      r.get("completed_at",""),
+    } for r in rows])
     buf=io.BytesIO()
     with pd.ExcelWriter(buf,engine="openpyxl") as w:
         df.to_excel(w,index=False,sheet_name="Surveillance")
         ws=w.sheets["Surveillance"]
-        from openpyxl.styles import PatternFill
+        from openpyxl.styles import PatternFill, Font
         for row in ws.iter_rows(min_row=2):
-            if row[7].value and row[7].value!="Non":
+            susp=row[11].value
+            if susp and susp!="Non":
                 for cell in row: cell.fill=PatternFill("solid",fgColor="FEE2E2")
         for col in ws.columns:
             ws.column_dimensions[col[0].column_letter].width=min(max(len(str(c.value or ""))+4 for c in col),50)
@@ -1362,11 +1424,110 @@ def _tab_surveillance():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,key="dl_surv")
 
+
+def render_agent_correction():
+    """Page de révision du devoir — sans afficher le score."""
+    agent = st.session_state.current_agent
+    quiz  = st.session_state.current_quiz
+    sid   = st.session_state.get("result_session_id") or st.session_state.get("session_id")
+
+    if not agent or not quiz or not sid:
+        go("home"); return
+
+    topbar(f"Corrigé — {quiz['titre']}", "📖")
+
+    st.markdown(
+        f'<div style="background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:12px;padding:12px 16px;margin:10px 0">' +
+        f'<b style="color:#1D4ED8">📋 {quiz["titre"]}</b> &nbsp;·&nbsp; ' +
+        f'<span style="color:#475569">{agent["nom"]} {agent.get("prenom","")}</span></div>',
+        unsafe_allow_html=True)
+
+    answers = get_session_answers(sid)
+    if not answers:
+        st.info("Aucune réponse enregistrée pour cette session.")
+        if st.button("← Retour",key="corr_back_top",use_container_width=True): go("agent_result")
+        return
+
+    total_q  = len(answers)
+    correctes = sum(1 for a in answers if a["is_correct"])
+
+    # Résumé visuel sans score numérique
+    pct = round(correctes/total_q*100) if total_q else 0
+    bar_col = "#059669" if pct>=70 else ("#D97706" if pct>=50 else "#DC2626")
+    st.markdown(
+        f'<div style="background:#fff;border:1.5px solid #E2E8F4;border-radius:12px;padding:14px 16px;margin:8px 0">' +
+        f'<div style="font-size:.82rem;color:#64748B;font-weight:600;margin-bottom:6px">{correctes} bonne(s) réponse(s) sur {total_q}</div>' +
+        f'<div style="background:#F1F5F9;border-radius:99px;height:8px;overflow:hidden">' +
+        f'<div style="width:{pct}%;height:8px;background:{bar_col};border-radius:99px"></div></div></div>',
+        unsafe_allow_html=True)
+
+    TYPES = {"single":"Choix unique","multiple":"Choix multiple","numeric":"Numérique","text":"Texte libre"}
+
+    for i, a in enumerate(answers):
+        ok      = bool(a["is_correct"])
+        bg      = "#F0FDF4" if ok else "#FFF5F5"
+        border  = "#6EE7B7" if ok else "#FCA5A5"
+        ico     = "✅" if ok else "❌"
+        pts_txt = f"+{a['points']:.0f}pt" if ok else "0pt"
+        pts_col = "#059669" if ok else "#DC2626"
+
+        # Construire la réponse agent lisible
+        resp_raw = a.get("reponse","")
+        try:
+            import json as _j
+            resp_parsed = _j.loads(resp_raw)
+        except Exception:
+            resp_parsed = resp_raw
+
+        agent_rep = ""
+        correct_rep = ""
+
+        if a["type"] in ("single","multiple"):
+            opts = a.get("options",[])
+            # Réponse agent
+            if isinstance(resp_parsed, list):
+                rep_ids = resp_parsed
+            elif resp_parsed:
+                rep_ids = [resp_parsed]
+            else:
+                rep_ids = []
+            agent_txts   = [o["texte"] for o in opts if o["id"] in rep_ids]
+            correct_txts = [o["texte"] for o in opts if o["is_correct"]]
+            agent_rep   = " / ".join(agent_txts) if agent_txts else "— Pas de réponse —"
+            correct_rep = " / ".join(correct_txts)
+        elif a["type"] == "numeric":
+            agent_rep   = str(resp_raw) if str(resp_raw).strip() else "— Pas de réponse —"
+            correct_rep = str(a.get("reponse_correcte_num",""))
+        elif a["type"] == "text":
+            agent_rep   = str(resp_raw) if str(resp_raw).strip() else "— Pas de réponse —"
+            raw_cor     = (a.get("reponse_correcte_txt") or "").strip()
+            correct_rep = raw_cor if raw_cor else "Question ouverte"
+
+        st.markdown(
+            f'<div style="background:{bg};border:1.5px solid {border};border-left:4px solid {border};border-radius:0 12px 12px 0;padding:14px 16px;margin:10px 0">' +
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+            f'<span style="background:#1D4ED8;color:#fff;font-size:.7rem;font-weight:900;padding:2px 8px;border-radius:99px">Q{i+1}</span>' +
+            f'<span style="color:#94A3B8;font-size:.75rem">{TYPES.get(a["type"],"")}</span>' +
+            f'<span style="margin-left:auto;font-size:.8rem;font-weight:800;color:{pts_col}">{ico} {pts_txt}</span></div>' +
+            f'<p style="font-size:15px;font-weight:600;color:#0F172A;margin:0 0 10px;line-height:1.5">{a["texte"]}</p>' +
+            f'<div style="background:rgba(0,0,0,.04);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:.85rem">' +
+            f'<span style="color:#64748B;font-weight:600">Votre réponse : </span>' +
+            f'<span style="color:#0F172A;font-weight:700">{agent_rep}</span></div>' +
+            (f'<div style="background:rgba(5,150,105,.08);border-radius:8px;padding:8px 12px;font-size:.85rem">' +
+             f'<span style="color:#059669;font-weight:600">Bonne réponse : </span>' +
+             f'<span style="color:#065F46;font-weight:700">{correct_rep}</span></div>'
+             if not ok and a["type"]!="text" or (a["type"]=="text" and (a.get("reponse_correcte_txt") or "").strip()) else "") +
+            f'</div>',
+            unsafe_allow_html=True)
+
+    st.markdown("---")
+    if st.button("← Retour aux résultats",key="corr_back",use_container_width=True): go("agent_result")
+
 #  ROUTEUR
 # ══════════════════════════════════════════════════════════════
 
 _R={"home":render_home,"agent_search":render_agent_search,"agent_quiz_code":render_agent_quiz_code,
-    "agent_quiz":render_agent_quiz,"agent_result":render_agent_result,
+    "agent_quiz":render_agent_quiz,"agent_result":render_agent_result,"agent_correction":render_agent_correction,
     "admin_login":render_admin_login,"admin_dashboard":render_admin_dashboard,
     "admin_quiz_edit":render_admin_quiz_edit}
 
