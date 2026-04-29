@@ -215,7 +215,7 @@ async function init() {
     if (!agent || !quiz || !sessionId) { window.location.href = "index.html"; return; }
 
     // Charger questions puis toutes les options en 2 requêtes parallèles
-    const qs = await supa(`questions?quiz_id=eq.${quiz.id}&order=ordre.asc`);
+    const qs = await supa(`questions?quiz_id=eq.${quiz.id}&select=id,texte,type,ordre,points,reponse_correcte_num,reponse_correcte_txt,image_url&order=ordre.asc`);
     const qIds = qs.map(q => q.id).join(",");
     const allOpts = qIds.length > 0
       ? await supa(`options?question_id=in.(${qIds})&order=question_id.asc,id.asc`)
