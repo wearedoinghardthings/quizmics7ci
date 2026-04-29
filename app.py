@@ -35,6 +35,27 @@ def _fmt(t):
     t = t.replace('\n', '<br>')
     return t
 
+
+SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co"
+SUPA_KEY  = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv"
+
+def _upload_image(uploaded_file, question_id):
+    """Upload une image dans Supabase Storage et retourne l'URL publique."""
+    import requests as _req
+    ext = (uploaded_file.name.split(".")[-1] or "jpg").lower()
+    fname = f"q_{question_id}_{int(time.time())}.{ext}"
+    url = f"{SUPA_URL}/storage/v1/object/quiz-images/{fname}"
+    headers = {
+        "apikey":        SUPA_KEY,
+        "Authorization": f"Bearer {SUPA_KEY}",
+        "Content-Type":  f"image/{ext}",
+        "x-upsert":      "true",
+    }
+    r = _req.put(url, data=uploaded_file.getvalue(), headers=headers, timeout=30)
+    if r.status_code not in (200, 201):
+        raise Exception(f"Upload échoué ({r.status_code}): {r.text[:200]}")
+    return f"{SUPA_URL}/storage/v1/object/public/quiz-images/{fname}"
+
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
                    layout="centered", initial_sidebar_state="collapsed")
 
@@ -688,7 +709,8 @@ def render_agent_quiz():
             f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
             f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
             f'<span class="qpts">{pts}</span></div>'
-            f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
+            + (f'<img src="{q["image_url"]}" style="width:100%;max-height:260px;object-fit:contain;border-radius:8px;margin-bottom:10px">' if q.get("image_url") else "")
+            + f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
 
         if q["type"]=="single":
             opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
@@ -1271,9 +1293,7 @@ def render_admin_quiz_edit():
         with c1: show_corr=st.checkbox("Permettre aux agents de revoir leur corrigé",value=bool(existing.get("show_correction",0)) if existing else False,help="Un bouton apparaît sur la page résultat — sans afficher le score")
         with c2: st.markdown("")
         st.markdown("**🔒 Anti-quitter**")
-        c1_ac,c2_ac=st.columns([3,1])
-        with c1_ac: anticheat=st.checkbox("Soumettre automatiquement si l'agent quitte l'écran",value=bool(existing.get("anticheat_actif",0)) if existing else False)
-        with c2_ac: anticheat_max=st.number_input("Sorties max",min_value=1,max_value=10,value=int(existing.get("anticheat_max",3) or 3) if existing else 3,step=1,disabled=not anticheat,key="ac_max_inp",help="Nombre de sorties avant soumission automatique")
+        anticheat=st.checkbox("Soumettre automatiquement si l'agent quitte l'écran (3 sorties max)",value=bool(existing.get("anticheat_actif",0)) if existing else False)
         if anticheat:
             all_ag=get_all_agents()
             try: ac_list=json.loads(existing.get("anticheat_agents","[]") or "[]") if existing else []
@@ -1284,7 +1304,7 @@ def render_admin_quiz_edit():
                 format_func=lambda x: next((f"{a['nom']} {a['prenom']}" for a in all_ag if a["id"]==x),"?"),
                 key="ac_agents_sel")
         else:
-            sel_ag=[]; anticheat_max=3
+            sel_ag=[]
 
         if st.form_submit_button("💾  Enregistrer",type="primary",use_container_width=True):
             if not titre.strip() or not code.strip(): st.error("Titre et code obligatoires.")
@@ -1292,11 +1312,11 @@ def render_admin_quiz_edit():
                 ac_json=json.dumps(sel_ag)
                 if is_new:
                     try:
-                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr),int(anticheat_max))
+                        nid=create_quiz(titre.strip(),code.strip(),int(duree),desc.strip(),int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr))
                         st.session_state.edit_quiz_id=nid; st.success("Quiz créé !"); st.rerun()
                     except Exception as e: st.error(f"Erreur (code déjà existant ?) : {e}")
                 else:
-                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr),int(anticheat_max)); st.success("Quiz mis à jour."); st.rerun()
+                    update_quiz(quiz_id,titre.strip(),code.strip(),int(duree),desc.strip(),existing["actif"],int(show_sc),int(rnd),int(malus_actif),float(malus_pts),int(anticheat),ac_json,int(show_corr)); st.success("Quiz mis à jour."); st.rerun()
     st.markdown('</div>',unsafe_allow_html=True)
 
     cur_id=st.session_state.edit_quiz_id
@@ -1336,6 +1356,8 @@ def render_admin_quiz_edit():
     # ── Reste du formulaire ──
     with st.form("faq", clear_on_submit=True):
         q_pts = st.number_input("Points", min_value=0.5, max_value=20.0, value=1.0, step=0.5)
+        img_file = st.file_uploader("🖼️ Image (optionnelle)", type=["jpg","jpeg","png","gif","webp"],
+                                    help="L'image s'affiche au-dessus du texte de la question")
 
         opts_d = []
         if q_type in ("single", "multiple"):
@@ -1377,16 +1399,25 @@ def render_admin_quiz_edit():
                 st.error(err)
             else:
                 ordre = len(questions)
+                # Upload image si fournie
+                img_url = ""
+                if img_file is not None:
+                    try:
+                        tmp_id = _execute_raw("SELECT MAX(id)+1 as nid FROM questions") or ordre
+                        img_url = _upload_image(img_file, f"{cur_id}_{ordre}")
+                    except Exception as e:
+                        st.error(f"Erreur upload image : {e}")
+                        img_url = ""
                 if q_type in ("single", "multiple"):
-                    add_question(cur_id, q_txt, q_type, ordre, q_pts, options=opts_d)
+                    add_question(cur_id, q_txt, q_type, ordre, q_pts, options=opts_d, image_url=img_url)
                 elif q_type == "numeric":
-                    add_question(cur_id, q_txt, q_type, ordre, q_pts, num=c_num)
+                    add_question(cur_id, q_txt, q_type, ordre, q_pts, num=c_num, image_url=img_url)
                 elif q_type == "text":
                     add_question(cur_id, q_txt, q_type, ordre, q_pts,
-                                 txt=(c_txt.strip() if c_txt else ""))
+                                 txt=(c_txt.strip() if c_txt else ""), image_url=img_url)
                 # Réinitialiser l'éditeur riche
                 st.session_state["rte_new_q"] = ""
-                st.success("Question ajoutée ✓")
+                st.success("Question ajoutée ✓" + (" (avec image)" if img_url else ""))
                 st.rerun()
 
 
