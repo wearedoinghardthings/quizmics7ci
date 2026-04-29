@@ -36,25 +36,22 @@ def _fmt(t):
     return t
 
 
-SUPA_URL = "https://yptijbomgldhwftuicno.supabase.co"
-SUPA_KEY  = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv"
+SUPA_URL_IMG = "https://yptijbomgldhwftuicno.supabase.co"
+SUPA_KEY_IMG = "sb_publishable_FERrIaP0u1ITsyqC9wiB8A_Lr9oOrpv"
 
-def _upload_image(uploaded_file, question_id):
-    """Upload une image dans Supabase Storage et retourne l'URL publique."""
-    import requests as _req
-    ext = (uploaded_file.name.split(".")[-1] or "jpg").lower()
-    fname = f"q_{question_id}_{int(time.time())}.{ext}"
-    url = f"{SUPA_URL}/storage/v1/object/quiz-images/{fname}"
-    headers = {
-        "apikey":        SUPA_KEY,
-        "Authorization": f"Bearer {SUPA_KEY}",
-        "Content-Type":  f"image/{ext}",
-        "x-upsert":      "true",
-    }
-    r = _req.put(url, data=uploaded_file.getvalue(), headers=headers, timeout=30)
+def _upload_image(file_obj, label):
+    """Upload une image dans Supabase Storage et retourne l URL publique."""
+    ext  = (file_obj.name.rsplit(".",1)[-1] or "jpg").lower()
+    name = f"q_{label}_{int(__import__('time').time())}.{ext}"
+    url  = f"{SUPA_URL_IMG}/storage/v1/object/quiz-images/{name}"
+    hdrs = {"apikey": SUPA_KEY_IMG,
+            "Authorization": f"Bearer {SUPA_KEY_IMG}",
+            "Content-Type": f"image/{ext}",
+            "x-upsert": "true"}
+    r = requests.put(url, data=file_obj.getvalue(), headers=hdrs, timeout=30)
     if r.status_code not in (200, 201):
-        raise Exception(f"Upload échoué ({r.status_code}): {r.text[:200]}")
-    return f"{SUPA_URL}/storage/v1/object/public/quiz-images/{fname}"
+        raise Exception(f"Erreur {r.status_code}: {r.text[:200]}")
+    return f"{SUPA_URL_IMG}/storage/v1/object/public/quiz-images/{name}"
 
 st.set_page_config(page_title=config.APP_TITLE, page_icon="📝",
                    layout="centered", initial_sidebar_state="collapsed")
@@ -704,13 +701,14 @@ def render_agent_quiz():
     for i,q in enumerate(questions):
         qid=q["id"]
         pts=f"{q['points']:.0f} pt"+("s" if q["points"]!=1 else "")
+        img_tag = f'<img src="{q["image_url"]}" style="width:100%;max-height:260px;object-fit:contain;border-radius:8px;margin-bottom:10px;display:block">' if q.get("image_url") else ""
         st.markdown(
             f'<div class="qcard">'
             f'<div class="qmeta"><span class="qnum">Q{i+1}</span>'
             f'<span class="qtype">{ICONS[q["type"]]} {HINTS[q["type"]]}</span>'
             f'<span class="qpts">{pts}</span></div>'
-            + (f'<img src="{q["image_url"]}" style="width:100%;max-height:260px;object-fit:contain;border-radius:8px;margin-bottom:10px">' if q.get("image_url") else "")
-            + f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
+            f'{img_tag}'
+            f'<p class="qtxt">{_fmt(q["texte"])}</p></div>', unsafe_allow_html=True)
 
         if q["type"]=="single":
             opts=q["options"]; cur=st.session_state.quiz_answers.get(qid)
@@ -1329,6 +1327,8 @@ def render_admin_quiz_edit():
     if questions:
         for i,q in enumerate(questions):
             with st.expander(f"Q{i+1}  ·  {_TYPES[q['type']]}  ·  {q['texte'][:50]}{'…' if len(q['texte'])>50 else ''}"):
+                if q.get("image_url"):
+                    st.image(q["image_url"], width=260, caption="Image de la question")
                 if q["type"] in("single","multiple"):
                     for o in q["options"]: st.markdown(f"{'✅' if o['is_correct'] else '◻️'} {o['texte']}")
                 elif q["type"]=="numeric": st.markdown(f"**Réponse :** `{q['reponse_correcte_num']}`")
@@ -1353,11 +1353,19 @@ def render_admin_quiz_edit():
     rte_val = rich_text_editor("Question *", key="rte_new_q",
                                default_value=st.session_state.get("rte_new_q", ""))
 
+    # ── Image — HORS du form pour éviter le rechargement ──
+    img_file = st.file_uploader(
+        "🖼️ Image pour la question (optionnelle — JPG, PNG, GIF, WEBP)",
+        type=["jpg","jpeg","png","gif","webp"],
+        key="q_img_upload",
+        help="S'affiche au-dessus du texte de la question côté agent"
+    )
+    if img_file:
+        st.image(img_file, width=220, caption="Aperçu de l'image")
+
     # ── Reste du formulaire ──
     with st.form("faq", clear_on_submit=True):
         q_pts = st.number_input("Points", min_value=0.5, max_value=20.0, value=1.0, step=0.5)
-        img_file = st.file_uploader("🖼️ Image (optionnelle)", type=["jpg","jpeg","png","gif","webp"],
-                                    help="L'image s'affiche au-dessus du texte de la question")
 
         opts_d = []
         if q_type in ("single", "multiple"):
@@ -1403,11 +1411,9 @@ def render_admin_quiz_edit():
                 img_url = ""
                 if img_file is not None:
                     try:
-                        tmp_id = _execute_raw("SELECT MAX(id)+1 as nid FROM questions") or ordre
                         img_url = _upload_image(img_file, f"{cur_id}_{ordre}")
                     except Exception as e:
-                        st.error(f"Erreur upload image : {e}")
-                        img_url = ""
+                        st.warning(f"Image non uploadée : {e}")
                 if q_type in ("single", "multiple"):
                     add_question(cur_id, q_txt, q_type, ordre, q_pts, options=opts_d, image_url=img_url)
                 elif q_type == "numeric":
@@ -1415,9 +1421,8 @@ def render_admin_quiz_edit():
                 elif q_type == "text":
                     add_question(cur_id, q_txt, q_type, ordre, q_pts,
                                  txt=(c_txt.strip() if c_txt else ""), image_url=img_url)
-                # Réinitialiser l'éditeur riche
                 st.session_state["rte_new_q"] = ""
-                st.success("Question ajoutée ✓" + (" (avec image)" if img_url else ""))
+                st.success("Question ajoutée ✓" + (" 🖼️" if img_url else ""))
                 st.rerun()
 
 
