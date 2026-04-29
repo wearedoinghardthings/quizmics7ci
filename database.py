@@ -208,7 +208,6 @@ def init_db():
     _safe_alter("quizzes",  "anticheat_actif",     "INTEGER DEFAULT 0")
     _safe_alter("quizzes",  "anticheat_agents",    "TEXT DEFAULT '[]'")
     _safe_alter("quizzes",  "show_correction",     "INTEGER DEFAULT 0")
-    _safe_alter("quizzes",  "anticheat_max",       "INTEGER DEFAULT 3")
     _safe_alter("questions","image_url",           "TEXT DEFAULT ''")
 
     release(conn)
