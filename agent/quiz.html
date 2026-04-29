@@ -540,9 +540,11 @@ async function submitQuiz(auto = false) {
     // Stocker résultat et rediriger
     sessionStorage.setItem("qa_result", JSON.stringify({
       score, max_score: maxScore,
-      show_score: quiz.show_score,
-      agent_nom: agent.nom, agent_prenom: agent.prenom || "",
-      quiz_titre: quiz.titre
+      show_score:       quiz.show_score,
+      show_correction:  quiz.show_correction || 0,
+      agent_nom:        agent.nom,
+      agent_prenom:     agent.prenom || "",
+      quiz_titre:       quiz.titre
     }));
     window.location.href = "result.html";
 
