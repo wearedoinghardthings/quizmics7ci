@@ -209,6 +209,7 @@ def init_db():
     _safe_alter("quizzes",  "anticheat_agents",    "TEXT DEFAULT '[]'")
     _safe_alter("quizzes",  "show_correction",     "INTEGER DEFAULT 0")
     _safe_alter("quizzes",  "anticheat_max",       "INTEGER DEFAULT 3")
+    _safe_alter("questions","image_url",           "TEXT DEFAULT ''")
 
     release(conn)
 
@@ -330,14 +331,14 @@ def get_all_quizzes():
 def get_quiz(qid):
     return _fetchone("SELECT * FROM quizzes WHERE id=?", (qid,))
 
-def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0, anticheat_max=3):
+def create_quiz(titre, code, duree, desc, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
     return _execute(
-        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents,show_correction,anticheat_max) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, anticheat_max))
+        "INSERT INTO quizzes (titre,code,duree_minutes,description,show_score,randomize_questions,malus_actif,malus_points,anticheat_actif,anticheat_agents,show_correction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (titre, code.upper(), duree, desc, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction))
 
-def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0, anticheat_max=3):
-    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=?,show_correction=?,anticheat_max=? WHERE id=?",
-         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, anticheat_max, qid))
+def update_quiz(qid, titre, code, duree, desc, actif, show_score=1, randomize=0, malus_actif=0, malus_points=0.0, anticheat_actif=0, anticheat_agents="[]", show_correction=0):
+    _run("UPDATE quizzes SET titre=?,code=?,duree_minutes=?,description=?,actif=?,show_score=?,randomize_questions=?,malus_actif=?,malus_points=?,anticheat_actif=?,anticheat_agents=?,show_correction=? WHERE id=?",
+         (titre, code.upper(), duree, desc, actif, show_score, randomize, malus_actif, malus_points, anticheat_actif, anticheat_agents, show_correction, qid))
 
 def delete_quiz(qid):
     _run("DELETE FROM quizzes WHERE id=?", (qid,))
@@ -352,10 +353,10 @@ def get_questions(qid, shuffled=False):
     if shuffled: random.shuffle(qs)
     return qs
 
-def add_question(qid, texte, qtype, ordre, points, options=None, num=None, txt=None):
+def add_question(qid, texte, qtype, ordre, points, options=None, num=None, txt=None, image_url=""):
     new_id = _execute(
-        "INSERT INTO questions (quiz_id,texte,type,ordre,points,reponse_correcte_num,reponse_correcte_txt) VALUES (?,?,?,?,?,?,?)",
-        (qid, texte, qtype, ordre, points, num, txt))
+        "INSERT INTO questions (quiz_id,texte,type,ordre,points,reponse_correcte_num,reponse_correcte_txt,image_url) VALUES (?,?,?,?,?,?,?,?)",
+        (qid, texte, qtype, ordre, points, num, txt, image_url or ""))
     if options and qtype in ("single","multiple"):
         for o in options:
             _execute("INSERT INTO options (question_id,texte,is_correct) VALUES (?,?,?)",
